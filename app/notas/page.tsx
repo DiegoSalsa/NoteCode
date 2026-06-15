@@ -1,0 +1,298 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
+
+type Note = {
+    id: string;
+    title: string;
+    content: string;
+    folder: string;
+    updatedAt: string;
+    createdAt: string;
+};
+
+const FOLDERS = ["General", "Procesos", "Tech", "Reuniones", "Ideas"];
+
+export default function NotasPage() {
+    const [notes, setNotes] = useState<Note[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState("");
+    const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+    const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<Note | null>(null);
+    const [form, setForm] = useState({ title: "", content: "", folder: "General" });
+    const [saving, setSaving] = useState(false);
+
+    const fetchNotes = useCallback(async () => {
+        const res = await fetch("/api/notes");
+        const data = await res.json();
+        setNotes(data);
+    }, []);
+
+    useEffect(() => {
+        fetchNotes().finally(() => setLoading(false));
+    }, [fetchNotes]);
+
+    function openCreate() {
+        setEditing(null);
+        setForm({ title: "", content: "", folder: selectedFolder || "General" });
+        setModalOpen(true);
+    }
+
+    function openEdit(n: Note) {
+        setEditing(n);
+        setForm({ title: n.title, content: n.content, folder: n.folder });
+        setModalOpen(true);
+    }
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            if (editing) {
+                await fetch(`/api/notes/${editing.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(form),
+                });
+            } else {
+                await fetch("/api/notes", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(form),
+                });
+            }
+            setModalOpen(false);
+            await fetchNotes();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleDelete(id: string) {
+        if (!confirm("¿Eliminar esta nota?")) return;
+        await fetch(`/api/notes/${id}`, { method: "DELETE" });
+        setSelectedNoteId(null);
+        await fetchNotes();
+    }
+
+    const folders = [...new Set([...FOLDERS, ...notes.map(n => n.folder)])];
+    const filtered = notes.filter((n) => {
+        const matchSearch = n.title.toLowerCase().includes(search.toLowerCase()) ||
+            n.content.toLowerCase().includes(search.toLowerCase());
+        const matchFolder = selectedFolder ? n.folder === selectedFolder : true;
+        return matchSearch && matchFolder;
+    });
+
+    const selectedNote = selectedNoteId ? notes.find(n => n.id === selectedNoteId) : null;
+
+    if (loading) {
+        return (
+            <div className="flex h-[calc(100vh-0px)]">
+                <div className="w-56 border-r border-white/10 bg-neutral-950 p-4 space-y-2">
+                    <div className="h-6 w-20 rounded bg-neutral-800 animate-pulse" />
+                    {[1, 2, 3, 4].map(i => <div key={i} className="h-6 rounded bg-neutral-800 animate-pulse" />)}
+                </div>
+                <div className="flex-1 p-8 space-y-4">
+                    <div className="h-8 w-48 rounded bg-neutral-800 animate-pulse" />
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex h-[calc(100vh-0px)]">
+            {/* Folder sidebar */}
+            <div className="w-56 shrink-0 border-r border-white/10 bg-neutral-950 flex flex-col">
+                <div className="px-4 py-4 border-b border-white/10">
+                    <button
+                        onClick={openCreate}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-neutral-100 px-3 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white transition-colors"
+                    >
+                        <Plus size={14} strokeWidth={2} />
+                        Nueva Nota
+                    </button>
+                </div>
+                <div className="flex-1 overflow-y-auto py-2 px-2">
+                    <button
+                        onClick={() => setSelectedFolder(null)}
+                        className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${selectedFolder === null ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+                            }`}
+                    >
+                        <FolderKanban size={14} strokeWidth={1.5} />
+                        Todas
+                    </button>
+                    <div className="mt-2 space-y-0.5">
+                        {folders.map((f) => (
+                            <button
+                                key={f}
+                                onClick={() => setSelectedFolder(f)}
+                                className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${selectedFolder === f ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+                                    }`}
+                            >
+                                {f}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div className="px-4 py-3 border-t border-white/10">
+                    <p className="text-[11px] text-neutral-600">{notes.length} notas</p>
+                </div>
+            </div>
+
+            {/* Notes list */}
+            <div className="w-72 shrink-0 border-r border-white/10 bg-neutral-950 flex flex-col">
+                <div className="px-3 py-3 border-b border-white/10">
+                    <div className="relative">
+                        <Search size={14} strokeWidth={1.5} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+                        <input
+                            type="text"
+                            placeholder="Buscar..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-full rounded-md border border-white/10 bg-neutral-900 pl-8 pr-3 py-1.5 text-[13px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20"
+                        />
+                    </div>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                    {filtered.map((n) => (
+                        <button
+                            key={n.id}
+                            onClick={() => setSelectedNoteId(n.id)}
+                            className={`w-full text-left px-4 py-3 border-b border-white/5 transition-colors ${selectedNoteId === n.id ? "bg-neutral-800" : "hover:bg-white/[0.02]"
+                                }`}
+                        >
+                            <h3 className="text-[14px] font-medium text-neutral-200 truncate">{n.title}</h3>
+                            <p className="text-[12px] text-neutral-500 mt-0.5 truncate">
+                                {n.content.slice(0, 80) || "Sin contenido"}
+                            </p>
+                            <div className="flex items-center gap-2 mt-2">
+                                <span className="text-[11px] text-neutral-600 bg-neutral-800 rounded px-1.5 py-0.5">{n.folder}</span>
+                                <span className="text-[11px] text-neutral-600">
+                                    {new Date(n.updatedAt).toLocaleDateString("es-MX")}
+                                </span>
+                            </div>
+                        </button>
+                    ))}
+                    {filtered.length === 0 && (
+                        <p className="px-4 py-8 text-center text-[13px] text-neutral-500">
+                            {search ? "Sin resultados." : "No hay notas en esta carpeta."}
+                        </p>
+                    )}
+                </div>
+            </div>
+
+            {/* Note viewer */}
+            <div className="flex-1 overflow-y-auto bg-neutral-950">
+                {selectedNote ? (
+                    <div className="max-w-3xl mx-auto px-10 py-10">
+                        <div className="flex items-start justify-between mb-6">
+                            <div>
+                                <h1 className="text-[22px] font-bold text-neutral-100">{selectedNote.title}</h1>
+                                <div className="flex items-center gap-3 mt-2">
+                                    <span className="text-[12px] text-neutral-500">{selectedNote.folder}</span>
+                                    <span className="text-[12px] text-neutral-600">
+                                        Actualizado: {new Date(selectedNote.updatedAt).toLocaleString("es-MX")}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => openEdit(selectedNote)}
+                                    className="p-2 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5 transition-colors"
+                                >
+                                    <Pencil size={15} strokeWidth={1.5} />
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(selectedNote.id)}
+                                    className="p-2 rounded text-neutral-500 hover:text-red-400 hover:bg-white/5 transition-colors"
+                                >
+                                    <Trash2 size={15} strokeWidth={1.5} />
+                                </button>
+                            </div>
+                        </div>
+                        <pre className="text-[15px] text-neutral-300 whitespace-pre-wrap leading-relaxed font-sans">
+                            {selectedNote.content || "Sin contenido"}
+                        </pre>
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-center h-full">
+                        <p className="text-[14px] text-neutral-500">Selecciona una nota o crea una nueva.</p>
+                    </div>
+                )}
+            </div>
+
+            {/* Modal */}
+            {modalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-lg rounded-xl border border-white/10 bg-neutral-900 p-6 shadow-2xl">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-[17px] font-semibold text-neutral-100">
+                                {editing ? "Editar Nota" : "Nueva Nota"}
+                            </h2>
+                            <button onClick={() => setModalOpen(false)} className="p-1 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
+                                <X size={16} strokeWidth={1.5} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Título</label>
+                                <input
+                                    required
+                                    value={form.title}
+                                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
+                                    placeholder="Título de la nota"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Carpeta</label>
+                                <input
+                                    value={form.folder}
+                                    onChange={(e) => setForm({ ...form, folder: e.target.value })}
+                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
+                                    placeholder="Ej: General, Reuniones..."
+                                    list="folder-suggestions"
+                                />
+                                <datalist id="folder-suggestions">
+                                    {folders.map((f) => (<option key={f} value={f} />))}
+                                </datalist>
+                            </div>
+                            <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Contenido</label>
+                                <textarea
+                                    value={form.content}
+                                    onChange={(e) => setForm({ ...form, content: e.target.value })}
+                                    rows={12}
+                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors resize-none font-sans"
+                                    placeholder="Escribe tu nota aquí..."
+                                />
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalOpen(false)}
+                                    className="flex-1 rounded-lg border border-white/10 px-4 py-2 text-[13px] font-medium text-neutral-300 hover:bg-white/5 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={saving}
+                                    className="flex-1 rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white transition-colors disabled:opacity-50"
+                                >
+                                    {saving ? "Guardando..." : editing ? "Actualizar" : "Crear"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
