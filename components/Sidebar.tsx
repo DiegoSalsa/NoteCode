@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import {
   Coins,
   FolderKanban,
@@ -28,16 +27,8 @@ type Me = {
   email: string;
 };
 
-export default function Sidebar() {
+export default function Sidebar({ me }: { me: Me | null }) {
   const pathname = usePathname();
-  const [me, setMe] = useState<Me | null>(null);
-
-  useEffect(() => {
-    fetch("/api/me")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => setMe(data))
-      .catch(() => setMe(null));
-  }, []);
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";

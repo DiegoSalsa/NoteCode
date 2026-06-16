@@ -1,6 +1,5 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
     FolderKanban,
     ShieldCheck,
@@ -9,6 +8,8 @@ import {
     Clock,
     GripVertical,
 } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 type ProjectWithClient = {
     id: string;
@@ -16,8 +17,8 @@ type ProjectWithClient = {
     description: string | null;
     status: string;
     clientId: string;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: Date;
+    updatedAt: Date;
     client: { id: string; name: string };
 };
 
@@ -27,15 +28,6 @@ type SummaryData = {
     pendingInvoices: number;
     pendingAmount: number;
 };
-
-type Me = {
-    displayName: string;
-    age: number | null;
-};
-
-function asArray<T>(value: unknown): T[] {
-    return Array.isArray(value) ? value : [];
-}
 
 function StatusBadge({ status }: { status: string }) {
     let style = "";
@@ -67,8 +59,8 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-function formatRelativeTime(dateStr: string) {
-    const date = new Date(dateStr);
+function formatRelativeTime(value: Date) {
+    const date = new Date(value);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -84,67 +76,45 @@ function formatRelativeTime(dateStr: string) {
     return `Hace ${Math.floor(diffDays / 30)} meses`;
 }
 
-export default function DashboardPage() {
-    const [projects, setProjects] = useState<ProjectWithClient[]>([]);
-    const [summary, setSummary] = useState<SummaryData>({
-        projects: 0,
-        credentials: 0,
-        pendingInvoices: 0,
-        pendingAmount: 0,
-    });
-    const [me, setMe] = useState<Me | null>(null);
-    const [loading, setLoading] = useState(true);
+export default async function DashboardPage() {
+    const user = await getCurrentUser();
+    if (!user) redirect("/");
 
-    useEffect(() => {
-        async function fetchData() {
-            try {
-                const [projRes, credRes, invRes, meRes] = await Promise.all([
-                    fetch("/api/projects?limit=5"),
-                    fetch("/api/credentials"),
-                    fetch("/api/invoices"),
-                    fetch("/api/me"),
-                ]);
+    const [profile, projects, projectCount, credentialCount, pendingInvoiceCount, pendingInvoiceTotal] =
+        await Promise.all([
+            prisma.userProfile.upsert({
+                where: { userId: user.id },
+                update: {},
+                create: {
+                    userId: user.id,
+                    email: user.email,
+                    displayName: user.name,
+                },
+                select: {
+                    displayName: true,
+                    age: true,
+                },
+            }),
+            prisma.project.findMany({
+                orderBy: { updatedAt: "desc" },
+                take: 5,
+                include: { client: { select: { id: true, name: true } } },
+            }),
+            prisma.project.count(),
+            prisma.credential.count(),
+            prisma.invoice.count({ where: { status: "Pendiente" } }),
+            prisma.invoice.aggregate({
+                where: { status: "Pendiente" },
+                _sum: { amount: true },
+            }),
+        ]);
 
-                const projData = asArray<ProjectWithClient>(await projRes.json());
-                const credData = asArray<unknown>(await credRes.json());
-                const invData = asArray<{ status: string; amount: number }>(await invRes.json());
-                const meData = meRes.ok ? await meRes.json() : null;
-
-                const pending = invData.filter((i) => i.status === "Pendiente");
-
-                setProjects(projData);
-                setMe(meData);
-                setSummary({
-                    projects: projData.length,
-                    credentials: credData.length,
-                    pendingInvoices: pending.length,
-                    pendingAmount: pending.reduce((sum: number, i: { amount: number }) => sum + i.amount, 0),
-                });
-            } catch (err) {
-                console.error("Failed to fetch dashboard data", err);
-            } finally {
-                setLoading(false);
-            }
-        }
-
-        fetchData();
-    }, []);
-
-    if (loading) {
-        return (
-            <div className="mx-auto max-w-5xl px-8 py-10 space-y-14">
-                <div className="space-y-2">
-                    <div className="h-8 w-72 rounded bg-neutral-800 animate-pulse" />
-                    <div className="h-5 w-96 rounded bg-neutral-800 animate-pulse" />
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-24 rounded-lg bg-neutral-900 animate-pulse border border-white/10" />
-                    ))}
-                </div>
-            </div>
-        );
-    }
+    const summary: SummaryData = {
+        projects: projectCount,
+        credentials: credentialCount,
+        pendingInvoices: pendingInvoiceCount,
+        pendingAmount: pendingInvoiceTotal._sum.amount ?? 0,
+    };
 
     const summaryItems = [
         {
@@ -172,11 +142,11 @@ export default function DashboardPage() {
             {/* Header */}
             <section className="space-y-2">
                 <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">
-                    Bienvenido, {me?.displayName || "PuroCoder"}
+                    Bienvenido, {profile.displayName || "PuroCoder"}
                 </h1>
                 <p className="text-[15px] text-neutral-400 leading-relaxed max-w-2xl">
-                    {me?.age
-                        ? `${me.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
+                    {profile.age
+                        ? `${profile.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
                         : "Tu centro de control personalizado para proyectos, notas y credenciales."}
                 </p>
             </section>
@@ -222,13 +192,13 @@ export default function DashboardPage() {
                             Última actividad en los proyectos de la agencia.
                         </p>
                     </div>
-                    <a
+                    <Link
                         href="/proyectos"
                         className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-colors"
                     >
                         <span>Ver todos</span>
                         <ArrowRight size={14} strokeWidth={1.5} />
-                    </a>
+                    </Link>
                 </div>
 
                 <div className="rounded-lg border border-white/10 bg-neutral-900 overflow-hidden">
@@ -246,9 +216,9 @@ export default function DashboardPage() {
 
                             <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
                                 <div className="min-w-0">
-                                    <a href={`/proyectos/${project.id}`} className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors">
+                                    <Link href={`/proyectos/${project.id}`} className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors">
                                         {project.name}
-                                    </a>
+                                    </Link>
                                     <p className="text-[12px] text-neutral-500 mt-0.5">
                                         {project.client.name}
                                     </p>

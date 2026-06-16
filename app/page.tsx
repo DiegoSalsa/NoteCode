@@ -38,7 +38,7 @@ export default function LoginPage() {
               autoComplete="email"
               required
               className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none transition-colors placeholder:text-neutral-600 focus:border-white/20"
-              placeholder="diego.guzman@purocode.com"
+              placeholder="email@purocode.com"
             />
           </div>
 

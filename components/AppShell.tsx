@@ -3,7 +3,18 @@
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+type ShellUser = {
+  displayName: string;
+  email: string;
+};
+
+export default function AppShell({
+  children,
+  user,
+}: {
+  children: React.ReactNode;
+  user: ShellUser | null;
+}) {
   const pathname = usePathname();
   const isLogin = pathname === "/";
 
@@ -13,7 +24,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Sidebar />
+      <Sidebar me={user} />
       <main className="ml-60 min-h-screen">{children}</main>
     </>
   );
