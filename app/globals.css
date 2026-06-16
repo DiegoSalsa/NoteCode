@@ -4,3 +4,21 @@
 @theme {
     --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 }
+
+button,
+a,
+select,
+summary,
+[role="button"],
+[type="button"],
+[type="submit"],
+[type="checkbox"],
+[type="radio"] {
+    cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"],
+[disabled] {
+    cursor: not-allowed;
+}

@@ -29,7 +29,6 @@ async function ensureProfile() {
 export async function updateProfile(formData: FormData) {
   const user = await requireUser();
   const displayName = String(formData.get("displayName") ?? "").trim();
-  const nationality = String(formData.get("nationality") ?? "").trim();
   const ageRaw = String(formData.get("age") ?? "").trim();
   const age = ageRaw ? Number(ageRaw) : null;
 
@@ -45,14 +44,12 @@ export async function updateProfile(formData: FormData) {
     where: { userId: user.id },
     update: {
       displayName,
-      nationality: nationality || null,
       age,
     },
     create: {
       userId: user.id,
       email: user.email,
       displayName,
-      nationality: nationality || null,
       age,
     },
   });

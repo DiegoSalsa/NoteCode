@@ -8,26 +8,43 @@ export default async function ProfilePage() {
   const user = await getCurrentUser();
   if (!user) redirect("/");
 
-  const profile = await prisma.userProfile.upsert({
-    where: { userId: user.id },
-    update: {},
-    create: {
-      userId: user.id,
-      email: user.email,
-      displayName: user.name,
-    },
-    include: {
-      personalSecrets: {
-        orderBy: { updatedAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          notes: true,
+  let profile;
+
+  try {
+    profile = await prisma.userProfile.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: {
+        userId: user.id,
+        email: user.email,
+        displayName: user.name,
+      },
+      include: {
+        personalSecrets: {
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            notes: true,
+          },
         },
       },
-    },
-  });
+    });
+  } catch (error) {
+    console.error("Failed to load profile", error);
+
+    return (
+      <div className="mx-auto max-w-3xl px-8 py-10">
+        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-5 py-4">
+          <h1 className="text-[17px] font-semibold text-red-200">No se pudo cargar el perfil</h1>
+          <p className="mt-2 text-[13px] text-red-200/80">
+            Revisa la conexion de base de datos en las variables de entorno de Vercel.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10 space-y-8">
@@ -59,35 +76,20 @@ export default async function ProfilePage() {
               />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="nationality" className="mb-1.5 block text-[13px] font-medium text-neutral-300">
-                  Nacionalidad
-                </label>
-                <input
-                  id="nationality"
-                  name="nationality"
-                  defaultValue={profile.nationality ?? ""}
-                  className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20"
-                  placeholder="Chilena"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="age" className="mb-1.5 block text-[13px] font-medium text-neutral-300">
-                  Edad
-                </label>
-                <input
-                  id="age"
-                  name="age"
-                  type="number"
-                  min="1"
-                  max="120"
-                  defaultValue={profile.age ?? ""}
-                  className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20"
-                  placeholder="28"
-                />
-              </div>
+            <div>
+              <label htmlFor="age" className="mb-1.5 block text-[13px] font-medium text-neutral-300">
+                Edad
+              </label>
+              <input
+                id="age"
+                name="age"
+                type="number"
+                min="1"
+                max="120"
+                defaultValue={profile.age ?? ""}
+                className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20"
+                placeholder="28"
+              />
             </div>
 
             <button

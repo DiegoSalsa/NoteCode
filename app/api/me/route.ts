@@ -21,7 +21,6 @@ export async function GET() {
       userId: true,
       email: true,
       displayName: true,
-      nationality: true,
       age: true,
     },
   });

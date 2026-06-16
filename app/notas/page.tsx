@@ -14,9 +14,14 @@ type Note = {
 
 const FOLDERS = ["General", "Procesos", "Tech", "Reuniones", "Ideas"];
 
+function asArray<T>(value: unknown): T[] {
+    return Array.isArray(value) ? value : [];
+}
+
 export default function NotasPage() {
     const [notes, setNotes] = useState<Note[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
     const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -29,7 +34,13 @@ export default function NotasPage() {
     const fetchNotes = useCallback(async () => {
         const res = await fetch("/api/notes");
         const data = await res.json();
-        setNotes(data);
+        if (!res.ok) {
+            setError("No se pudieron cargar las notas.");
+            setNotes([]);
+            return;
+        }
+        setError(null);
+        setNotes(asArray<Note>(data));
     }, []);
 
     useEffect(() => {
@@ -110,6 +121,7 @@ export default function NotasPage() {
             {/* Folder sidebar */}
             <div className="w-56 shrink-0 border-r border-white/10 bg-neutral-950 flex flex-col">
                 <div className="px-4 py-4 border-b border-white/10">
+                    {error && <p className="mb-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</p>}
                     <button
                         onClick={openCreate}
                         className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-neutral-100 px-3 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white transition-colors"

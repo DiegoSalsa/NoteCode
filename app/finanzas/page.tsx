@@ -18,6 +18,10 @@ type Invoice = {
 
 const STATUSES = ["Pendiente", "Pagado", "Vencido", "Cancelado"];
 
+function asArray<T>(value: unknown): T[] {
+    return Array.isArray(value) ? value : [];
+}
+
 function StatusBadge({ status }: { status: string }) {
     let style = "";
     switch (status) {
@@ -38,6 +42,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function FinanzasPage() {
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -48,7 +53,13 @@ export default function FinanzasPage() {
     const fetchInvoices = useCallback(async () => {
         const res = await fetch("/api/invoices");
         const data = await res.json();
-        setInvoices(data);
+        if (!res.ok) {
+            setError("No se pudieron cargar las finanzas.");
+            setInvoices([]);
+            return;
+        }
+        setError(null);
+        setInvoices(asArray<Invoice>(data));
     }, []);
 
     useEffect(() => {
@@ -138,6 +149,7 @@ export default function FinanzasPage() {
                     <div>
                         <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">Finanzas</h1>
                         <p className="text-[13px] text-neutral-500 mt-1">{invoices.length} facturas registradas</p>
+                        {error && <p className="mt-2 text-[13px] text-red-300">{error}</p>}
                     </div>
                     <button
                         onClick={openCreate}

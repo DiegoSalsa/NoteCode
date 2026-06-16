@@ -30,7 +30,6 @@ type SummaryData = {
 
 type Me = {
     displayName: string;
-    nationality: string | null;
     age: number | null;
 };
 
@@ -176,8 +175,8 @@ export default function DashboardPage() {
                     Bienvenido, {me?.displayName || "PuroCoder"}
                 </h1>
                 <p className="text-[15px] text-neutral-400 leading-relaxed max-w-2xl">
-                    {me?.nationality || me?.age
-                        ? `${me.nationality || "Perfil interno"}${me.age ? ` / ${me.age} anos` : ""}. Tu centro de control personalizado para proyectos, notas y credenciales.`
+                    {me?.age
+                        ? `${me.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
                         : "Tu centro de control personalizado para proyectos, notas y credenciales."}
                 </p>
             </section>
