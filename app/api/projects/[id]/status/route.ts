@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { syncProjectInvoice } from "@/lib/projects";
 
 export async function GET(
     _request: NextRequest,
@@ -34,6 +35,8 @@ export async function POST(
                 data: { status: body.status },
             }),
         ]);
+
+        await syncProjectInvoice(id);
 
         return NextResponse.json(log, { status: 201 });
     } catch {

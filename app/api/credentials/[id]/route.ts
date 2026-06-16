@@ -1,39 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { encryptString } from "@/lib/crypto";
+
+const MASKED_SECRET = "************";
 
 export async function PATCH(
-    request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-    try {
-        const { id } = await params;
-        const body = await request.json();
-        const credential = await prisma.credential.update({
-            where: { id },
-            data: {
-                title: body.title,
-                service: body.service,
-                username: body.username,
-                password: body.password,
-                url: body.url,
-                notes: body.notes,
-            },
-        });
-        return NextResponse.json({ ...credential, password: "••••••••" });
-    } catch (error) {
-        return NextResponse.json({ error: "Failed to update credential" }, { status: 500 });
-    }
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const data: {
+      name?: string;
+      username?: string;
+      secretData?: string;
+    } = {};
+
+    if (body.name || body.title) data.name = body.name || body.title;
+    if (body.username) data.username = body.username;
+    if (body.password) data.secretData = encryptString(body.password);
+
+    const credential = await prisma.credential.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        username: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return NextResponse.json({ ...credential, password: MASKED_SECRET });
+  } catch {
+    return NextResponse.json({ error: "Failed to update credential" }, { status: 500 });
+  }
 }
 
 export async function DELETE(
-    _request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-    try {
-        const { id } = await params;
-        await prisma.credential.delete({ where: { id } });
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        return NextResponse.json({ error: "Failed to delete credential" }, { status: 500 });
-    }
+  try {
+    const { id } = await params;
+    await prisma.credential.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: "Failed to delete credential" }, { status: 500 });
+  }
 }

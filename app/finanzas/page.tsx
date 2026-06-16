@@ -5,6 +5,7 @@ import { Plus, Search, Pencil, Trash2, X, ArrowUpRight, ArrowDownRight, DollarSi
 
 type Invoice = {
     id: string;
+    projectId: string | null;
     number: string;
     client: string;
     amount: number;
@@ -114,6 +115,8 @@ export default function FinanzasPage() {
     );
 
     const totalAmount = invoices.reduce((sum, i) => sum + i.amount, 0);
+    const netAmount = totalAmount / 1.19;
+    const vatAmount = totalAmount - netAmount;
     const pendingAmount = invoices.filter((i) => i.status === "Pendiente").reduce((sum, i) => sum + i.amount, 0);
     const paidAmount = invoices.filter((i) => i.status === "Pagado").reduce((sum, i) => sum + i.amount, 0);
 
@@ -146,7 +149,7 @@ export default function FinanzasPage() {
                 </div>
 
                 {/* KPI Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800">
@@ -155,6 +158,16 @@ export default function FinanzasPage() {
                             <span className="text-[12px] font-medium text-neutral-400">Total Facturado</span>
                         </div>
                         <p className="text-2xl font-semibold tabular-nums text-neutral-100">${totalAmount.toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800">
+                                <DollarSign size={14} strokeWidth={1.5} className="text-neutral-400" />
+                            </div>
+                            <span className="text-[12px] font-medium text-neutral-400">Neto sin IVA</span>
+                        </div>
+                        <p className="text-2xl font-semibold tabular-nums text-neutral-100">${Math.round(netAmount).toLocaleString()}</p>
+                        <p className="mt-1 text-[11px] text-neutral-600">IVA 19%: ${Math.round(vatAmount).toLocaleString()}</p>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
                         <div className="flex items-center gap-3 mb-2">
@@ -209,6 +222,9 @@ export default function FinanzasPage() {
                             <div className="flex items-center gap-4 shrink-0">
                                 <span className="text-[14px] font-semibold tabular-nums text-neutral-200">
                                     ${inv.amount.toLocaleString()}
+                                </span>
+                                <span className="text-[12px] text-neutral-600">
+                                    Neto: ${Math.round(inv.amount / 1.19).toLocaleString()}
                                 </span>
                                 <StatusBadge status={inv.status} />
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

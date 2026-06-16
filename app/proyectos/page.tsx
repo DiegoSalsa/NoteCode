@@ -19,6 +19,7 @@ type Project = {
     name: string;
     description: string | null;
     status: string;
+    agreedAmount: number;
     clientId: string;
     createdAt: string;
     updatedAt: string;
@@ -53,19 +54,19 @@ export default function ProyectosPage() {
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Project | null>(null);
-    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "" });
+    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
     const [saving, setSaving] = useState(false);
 
     const fetchProjects = useCallback(async () => {
         const res = await fetch("/api/projects");
         const data = await res.json();
-        setProjects(data);
+        setProjects(Array.isArray(data) ? data : []);
     }, []);
 
     const fetchClients = useCallback(async () => {
         const res = await fetch("/api/clients");
         const data = await res.json();
-        setClients(data);
+        setClients(Array.isArray(data) ? data : []);
     }, []);
 
     useEffect(() => {
@@ -74,13 +75,13 @@ export default function ProyectosPage() {
 
     function openCreate() {
         setEditing(null);
-        setForm({ name: "", description: "", status: "En progreso", clientId: clients[0]?.id || "" });
+        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
         setModalOpen(true);
     }
 
     function openEdit(p: Project) {
         setEditing(p);
-        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId });
+        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId, clientName: p.client.name, agreedAmount: String(p.agreedAmount || "") });
         setModalOpen(true);
     }
 
@@ -92,13 +93,13 @@ export default function ProyectosPage() {
                 await fetch(`/api/projects/${editing.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(form),
+                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0 }),
                 });
             } else {
                 await fetch("/api/projects", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(form),
+                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0 }),
                 });
             }
             setModalOpen(false);
@@ -120,6 +121,9 @@ export default function ProyectosPage() {
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.client.name.toLowerCase().includes(search.toLowerCase())
     );
+    const clientSuggestions = form.clientName.trim()
+        ? clients.filter((client) => client.name.toLowerCase().includes(form.clientName.toLowerCase())).slice(0, 5)
+        : [];
 
     if (loading) {
         return (
@@ -178,6 +182,9 @@ export default function ProyectosPage() {
                                     {project.name}
                                 </a>
                                 <p className="text-[12px] text-neutral-500 mt-0.5">{project.client.name}</p>
+                                <p className="text-[12px] text-neutral-600 mt-0.5">
+                                    Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}
+                                </p>
                             </div>
                             <div className="flex items-center gap-4 shrink-0">
                                 <StatusBadge status={project.status} />
@@ -243,19 +250,42 @@ export default function ProyectosPage() {
                                     placeholder="Opcional"
                                 />
                             </div>
-                            <div>
+                            <div className="relative">
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Cliente</label>
-                                <select
+                                <input
                                     required
-                                    value={form.clientId}
-                                    onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+                                    value={form.clientName}
+                                    onChange={(e) => setForm({ ...form, clientName: e.target.value, clientId: "" })}
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
-                                >
-                                    <option value="">Seleccionar cliente</option>
-                                    {clients.map((c) => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
-                                </select>
+                                    placeholder="Escribe el cliente"
+                                />
+                                {clientSuggestions.length > 0 && !form.clientId && (
+                                    <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-lg border border-white/10 bg-neutral-950 shadow-xl">
+                                        {clientSuggestions.map((client) => (
+                                            <button
+                                                key={client.id}
+                                                type="button"
+                                                onClick={() => setForm({ ...form, clientId: client.id, clientName: client.name })}
+                                                className="block w-full px-3 py-2 text-left text-[13px] text-neutral-300 hover:bg-white/5 hover:text-neutral-100"
+                                            >
+                                                Usar cliente existente: {client.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Valor acordado ($)</label>
+                                <input
+                                    required
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={form.agreedAmount}
+                                    onChange={(e) => setForm({ ...form, agreedAmount: e.target.value })}
+                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
+                                    placeholder="Ej: 1500000"
+                                />
                             </div>
                             <div>
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Estado</label>

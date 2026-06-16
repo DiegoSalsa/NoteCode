@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
+import { revealCredential } from "@/app/actions/credentials";
 import {
     ArrowLeft,
     Eye,
@@ -20,6 +21,7 @@ type ProjectData = {
     name: string;
     description: string | null;
     status: string;
+    agreedAmount: number;
     client: { id: string; name: string };
     createdAt: string;
     updatedAt: string;
@@ -65,6 +67,10 @@ const REQ_CATEGORIES = ["Funcional", "Técnico", "UX/UI", "Seguridad"];
 const PRIORITIES = ["Alta", "Media", "Baja"];
 const TECH_CATEGORIES = ["Frontend", "Backend", "DevOps", "Base de Datos", "Herramientas"];
 
+function asArray<T>(value: unknown): T[] {
+    return Array.isArray(value) ? value : [];
+}
+
 function StatusBadge({ status }: { status: string }) {
     let style = "";
     switch (status) {
@@ -103,6 +109,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [notes, setNotes] = useState<ProjectNote[]>([]);
     const [loading, setLoading] = useState(true);
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
+    const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 
     // Tab
     const [tab, setTab] = useState("overview");
@@ -139,13 +146,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             fetch(`/api/projects/${id}/credentials`).then(r => r.json()),
             fetch(`/api/projects/${id}/notes`).then(r => r.json()),
         ]);
-        const p = projRes.find((x: ProjectData) => x.id === id);
+        const projects = asArray<ProjectData>(projRes);
+        const p = projects.find((x) => x.id === id);
         setProject(p || null);
-        setStatusLogs(logRes);
-        setRequirements(reqRes);
-        setTechs(techRes);
-        setCreds(credRes);
-        setNotes(noteRes);
+        setStatusLogs(asArray<StatusLog>(logRes));
+        setRequirements(asArray<Requirement>(reqRes));
+        setTechs(asArray<Tech>(techRes));
+        setCreds(asArray<Credential>(credRes));
+        setNotes(asArray<ProjectNote>(noteRes));
     }, [id]);
 
     useEffect(() => {
@@ -240,7 +248,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         await fetchAll();
     }
 
-    function toggleReveal(cId: string) {
+    async function toggleReveal(cId: string) {
+        if (!revealed.has(cId) && !revealedSecrets[cId]) {
+            const secret = await revealCredential(cId);
+            setRevealedSecrets(prev => ({ ...prev, [cId]: secret }));
+        }
+
         setRevealed(prev => {
             const next = new Set(prev);
             next.has(cId) ? next.delete(cId) : next.add(cId);
@@ -286,6 +299,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <div>
                         <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">{project.name}</h1>
                         <p className="text-[14px] text-neutral-500 mt-1">{project.client.name}</p>
+                        <p className="text-[13px] text-neutral-500 mt-1">
+                            Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}
+                        </p>
                         {project.description && (
                             <p className="text-[14px] text-neutral-400 mt-2 max-w-2xl">{project.description}</p>
                         )}
@@ -457,7 +473,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-2 bg-neutral-950 border border-white/10 rounded-md px-3 py-1.5">
                                         <span className="text-[13px] font-mono text-neutral-300 select-all">
-                                            {revealed.has(c.id) ? c.password : "••••••••"}
+                                            {revealed.has(c.id) ? revealedSecrets[c.id] : "************"}
                                         </span>
                                         <button onClick={() => toggleReveal(c.id)} className="text-neutral-500 hover:text-neutral-300">
                                             {revealed.has(c.id) ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}

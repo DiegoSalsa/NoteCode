@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
     title: "PuroCode",
@@ -16,10 +16,7 @@ export default function RootLayout({
     return (
         <html lang="es" className="bg-neutral-950">
             <body className="bg-neutral-950 text-neutral-100 antialiased min-h-screen font-sans">
-                <Sidebar />
-                <main className="ml-60 min-h-screen">
-                    {children}
-                </main>
+                <AppShell>{children}</AppShell>
             </body>
         </html>
     );
