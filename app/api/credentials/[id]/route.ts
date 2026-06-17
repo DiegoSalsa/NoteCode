@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
+import { invalidateCache } from "@/lib/server-cache";
 
 const MASKED_SECRET = "************";
 
@@ -33,6 +34,9 @@ export async function PATCH(
         updatedAt: true,
       },
     });
+    invalidateCache(`project:${credential.projectId}`);
+    invalidateCache("credentials");
+    invalidateCache("vault");
 
     return NextResponse.json({ ...credential, password: MASKED_SECRET });
   } catch {
@@ -46,7 +50,13 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await prisma.credential.delete({ where: { id } });
+    const credential = await prisma.credential.delete({
+      where: { id },
+      select: { projectId: true },
+    });
+    invalidateCache(`project:${credential.projectId}`);
+    invalidateCache("credentials");
+    invalidateCache("vault");
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete credential" }, { status: 500 });

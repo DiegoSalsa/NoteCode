@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function GET() {
     try {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
                 company: body.company || null,
             },
         });
+        invalidateCache("projects:");
         return NextResponse.json(client, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: "Failed to create client" }, { status: 500 });

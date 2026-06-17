@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function GET(
     _request: NextRequest,
@@ -31,6 +32,7 @@ export async function POST(
                 content: body.content || "",
             },
         });
+        invalidateCache(`project:${id}`);
         return NextResponse.json(item, { status: 201 });
     } catch {
         return NextResponse.json({ error: "Failed" }, { status: 500 });

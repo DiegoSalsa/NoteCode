@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function GET(request: NextRequest) {
     try {
@@ -35,6 +36,8 @@ export async function POST(request: NextRequest) {
             include: { client: { select: { id: true, name: true } } },
         });
         await syncProjectInvoice(project.id);
+        invalidateCache("projects:");
+        invalidateCache("vault");
         return NextResponse.json(project, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: "Failed to create project" }, { status: 500 });

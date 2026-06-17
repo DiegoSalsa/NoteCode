@@ -82,19 +82,26 @@ export default async function DashboardPage() {
 
     const [profile, projects, projectCount, credentialCount, pendingInvoiceCount, pendingInvoiceTotal] =
         await Promise.all([
-            prisma.userProfile.upsert({
+            prisma.userProfile.findUnique({
                 where: { userId: user.id },
-                update: {},
-                create: {
-                    userId: user.id,
-                    email: user.email,
-                    displayName: user.name,
-                },
                 select: {
                     displayName: true,
                     age: true,
                 },
-            }),
+            }).then((profile) =>
+                profile ??
+                prisma.userProfile.create({
+                    data: {
+                        userId: user.id,
+                        email: user.email,
+                        displayName: user.name,
+                    },
+                    select: {
+                        displayName: true,
+                        age: true,
+                    },
+                }),
+            ),
             prisma.project.findMany({
                 orderBy: { updatedAt: "desc" },
                 take: 5,

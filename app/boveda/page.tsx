@@ -23,6 +23,11 @@ type Project = {
   client: { name: string };
 };
 
+type VaultPayload = {
+  credentials: Credential[];
+  projects: Project[];
+};
+
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value : [];
 }
@@ -38,15 +43,11 @@ export default function BovedaPage() {
   const [form, setForm] = useState({ projectId: "", name: "", username: "", password: "" });
 
   const fetchData = useCallback(async () => {
-    const [credentialsRes, projectsRes] = await Promise.all([
-      fetch("/api/credentials"),
-      fetch("/api/projects"),
-    ]);
-    const credentialsData = await credentialsRes.json();
-    const projectsData = await projectsRes.json();
+    const res = await fetch("/api/vault");
+    const data = (await res.json()) as Partial<VaultPayload>;
 
-    const projectItems = asArray<Project>(projectsData);
-    setCredentials(asArray<Credential>(credentialsData));
+    const projectItems = asArray<Project>(data.projects);
+    setCredentials(asArray<Credential>(data.credentials));
     setProjects(projectItems);
     setForm((current) => ({
       ...current,

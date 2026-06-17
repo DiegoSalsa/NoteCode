@@ -26,6 +26,11 @@ type Project = {
     client: Client;
 };
 
+type ProjectsPayload = {
+    projects: Project[];
+    clients: Client[];
+};
+
 const STATUSES = ["Planificado", "En progreso", "Revisión", "Completado"];
 
 function StatusBadge({ status }: { status: string }) {
@@ -57,21 +62,16 @@ export default function ProyectosPage() {
     const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
     const [saving, setSaving] = useState(false);
 
-    const fetchProjects = useCallback(async () => {
-        const res = await fetch("/api/projects");
-        const data = await res.json();
-        setProjects(Array.isArray(data) ? data : []);
-    }, []);
-
-    const fetchClients = useCallback(async () => {
-        const res = await fetch("/api/clients");
-        const data = await res.json();
-        setClients(Array.isArray(data) ? data : []);
+    const fetchData = useCallback(async () => {
+        const res = await fetch("/api/projects/init");
+        const data = (await res.json()) as Partial<ProjectsPayload>;
+        setProjects(Array.isArray(data.projects) ? data.projects : []);
+        setClients(Array.isArray(data.clients) ? data.clients : []);
     }, []);
 
     useEffect(() => {
-        Promise.all([fetchProjects(), fetchClients()]).finally(() => setLoading(false));
-    }, [fetchProjects, fetchClients]);
+        fetchData().finally(() => setLoading(false));
+    }, [fetchData]);
 
     function openCreate() {
         setEditing(null);
@@ -103,7 +103,7 @@ export default function ProyectosPage() {
                 });
             }
             setModalOpen(false);
-            await fetchProjects();
+            await fetchData();
         } catch (err) {
             console.error(err);
         } finally {
@@ -114,7 +114,7 @@ export default function ProyectosPage() {
     async function handleDelete(id: string) {
         if (!confirm("¿Eliminar este proyecto?")) return;
         await fetch(`/api/projects/${id}`, { method: "DELETE" });
-        await fetchProjects();
+        await fetchData();
     }
 
     const filtered = projects.filter((p) =>

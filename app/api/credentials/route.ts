@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
+import { cached, invalidateCache } from "@/lib/server-cache";
 
 const MASKED_SECRET = "************";
 
 export async function GET() {
   try {
-    const credentials = await prisma.credential.findMany({
+    const credentials = await cached("credentials", 30_000, async () => prisma.credential.findMany({
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -22,7 +23,7 @@ export async function GET() {
           },
         },
       },
-    });
+    }));
 
     return NextResponse.json(
       credentials.map((credential) => ({
@@ -67,6 +68,9 @@ export async function POST(request: NextRequest) {
         updatedAt: true,
       },
     });
+    invalidateCache(`project:${credential.projectId}`);
+    invalidateCache("credentials");
+    invalidateCache("vault");
 
     return NextResponse.json({ ...credential, password: MASKED_SECRET }, { status: 201 });
   } catch {

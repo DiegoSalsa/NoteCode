@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
+import { invalidateCache } from "@/lib/server-cache";
 
 const MASKED_SECRET = "************";
 
@@ -59,6 +60,10 @@ export async function POST(
         updatedAt: true,
       },
     });
+
+    invalidateCache(`project:${id}`);
+    invalidateCache("credentials");
+    invalidateCache("vault");
 
     return NextResponse.json(
       {

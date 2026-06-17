@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function DELETE(
   _request: NextRequest,
@@ -13,6 +14,9 @@ export async function DELETE(
         projectId: id,
       },
     });
+    invalidateCache(`project:${id}`);
+    invalidateCache("credentials");
+    invalidateCache("vault");
 
     return NextResponse.json({ success: true });
   } catch {

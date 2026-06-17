@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function PATCH(
     request: NextRequest,
@@ -17,6 +18,8 @@ export async function PATCH(
                 company: body.company,
             },
         });
+        invalidateCache("projects:");
+        invalidateCache("vault");
         return NextResponse.json(client);
     } catch (error) {
         return NextResponse.json({ error: "Failed to update client" }, { status: 500 });
@@ -30,6 +33,8 @@ export async function DELETE(
     try {
         const { id } = await params;
         await prisma.client.delete({ where: { id } });
+        invalidateCache("projects:");
+        invalidateCache("vault");
         return NextResponse.json({ success: true });
     } catch (error) {
         return NextResponse.json({ error: "Failed to delete client" }, { status: 500 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function PATCH(
     request: NextRequest,
@@ -19,6 +20,7 @@ export async function PATCH(
                 paidAt: body.paidAt ? new Date(body.paidAt) : null,
             },
         });
+        invalidateCache("invoices");
         return NextResponse.json(invoice);
     } catch (error) {
         return NextResponse.json({ error: "Failed to update invoice" }, { status: 500 });
@@ -32,6 +34,7 @@ export async function DELETE(
     try {
         const { id } = await params;
         await prisma.invoice.delete({ where: { id } });
+        invalidateCache("invoices");
         return NextResponse.json({ success: true });
     } catch (error) {
         return NextResponse.json({ error: "Failed to delete invoice" }, { status: 500 });

@@ -62,6 +62,15 @@ type ProjectNote = {
     updatedAt: string;
 };
 
+type ProjectDetailPayload = {
+    project: ProjectData;
+    statusLogs: StatusLog[];
+    requirements: Requirement[];
+    techs: Tech[];
+    credentials: Credential[];
+    notes: ProjectNote[];
+};
+
 const STATUSES = ["Planificado", "En progreso", "Revisión", "Completado"];
 const REQ_CATEGORIES = ["Funcional", "Técnico", "UX/UI", "Seguridad"];
 const PRIORITIES = ["Alta", "Media", "Baja"];
@@ -138,22 +147,19 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [noteContent, setNoteContent] = useState("");
 
     const fetchAll = useCallback(async () => {
-        const [projRes, logRes, reqRes, techRes, credRes, noteRes] = await Promise.all([
-            fetch(`/api/projects`).then(r => r.json()),
-            fetch(`/api/projects/${id}/status`).then(r => r.json()),
-            fetch(`/api/projects/${id}/requirements`).then(r => r.json()),
-            fetch(`/api/projects/${id}/techs`).then(r => r.json()),
-            fetch(`/api/projects/${id}/credentials`).then(r => r.json()),
-            fetch(`/api/projects/${id}/notes`).then(r => r.json()),
-        ]);
-        const projects = asArray<ProjectData>(projRes);
-        const p = projects.find((x) => x.id === id);
-        setProject(p || null);
-        setStatusLogs(asArray<StatusLog>(logRes));
-        setRequirements(asArray<Requirement>(reqRes));
-        setTechs(asArray<Tech>(techRes));
-        setCreds(asArray<Credential>(credRes));
-        setNotes(asArray<ProjectNote>(noteRes));
+        const res = await fetch(`/api/projects/${id}`);
+        if (!res.ok) {
+            setProject(null);
+            return;
+        }
+
+        const data = (await res.json()) as ProjectDetailPayload;
+        setProject(data.project);
+        setStatusLogs(asArray<StatusLog>(data.statusLogs));
+        setRequirements(asArray<Requirement>(data.requirements));
+        setTechs(asArray<Tech>(data.techs));
+        setCreds(asArray<Credential>(data.credentials));
+        setNotes(asArray<ProjectNote>(data.notes));
     }, [id]);
 
     useEffect(() => {

@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC_PATHS = ["/"];
 const SESSION_COOKIE_NAME = "purocode_session";
 
+let cachedSecret: string | undefined;
+let cachedKeyPromise: Promise<CryptoKey> | null = null;
+
 function base64UrlToText(value: string) {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
@@ -20,13 +23,18 @@ async function sign(value: string) {
   const secret = process.env.SESSION_SECRET;
   if (!secret) return null;
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
+  if (!cachedKeyPromise || cachedSecret !== secret) {
+    cachedSecret = secret;
+    cachedKeyPromise = crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  }
+
+  const key = await cachedKeyPromise;
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
 
   return bytesToHex(signature);

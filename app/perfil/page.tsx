@@ -11,14 +11,9 @@ export default async function ProfilePage() {
   let profile;
 
   try {
-    profile = await prisma.userProfile.upsert({
+    profile =
+      (await prisma.userProfile.findUnique({
       where: { userId: user.id },
-      update: {},
-      create: {
-        userId: user.id,
-        email: user.email,
-        displayName: user.name,
-      },
       include: {
         personalSecrets: {
           orderBy: { updatedAt: "desc" },
@@ -30,7 +25,25 @@ export default async function ProfilePage() {
           },
         },
       },
-    });
+    })) ??
+      (await prisma.userProfile.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          displayName: user.name,
+        },
+        include: {
+          personalSecrets: {
+            orderBy: { updatedAt: "desc" },
+            select: {
+              id: true,
+              name: true,
+              username: true,
+              notes: true,
+            },
+          },
+        },
+      }));
   } catch (error) {
     console.error("Failed to load profile", error);
 

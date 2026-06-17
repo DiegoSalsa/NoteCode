@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncProjectInvoice } from "@/lib/projects";
+import { invalidateCache } from "@/lib/server-cache";
 
 export async function GET(
     _request: NextRequest,
@@ -37,6 +38,8 @@ export async function POST(
         ]);
 
         await syncProjectInvoice(id);
+        invalidateCache(`project:${id}`);
+        invalidateCache("projects:");
 
         return NextResponse.json(log, { status: 201 });
     } catch {
