@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
+import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 
 type Note = {
     id: string;
@@ -19,8 +20,9 @@ function asArray<T>(value: unknown): T[] {
 }
 
 export default function NotasPage() {
-    const [notes, setNotes] = useState<Note[]>([]);
-    const [loading, setLoading] = useState(true);
+    const cached = readCachedJson<Note[]>("notes");
+    const [notes, setNotes] = useState<Note[]>(() => asArray<Note>(cached));
+    const [loading, setLoading] = useState(!cached);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -32,15 +34,13 @@ export default function NotasPage() {
     const [saving, setSaving] = useState(false);
 
     const fetchNotes = useCallback(async () => {
-        const res = await fetch("/api/notes");
-        const data = await res.json();
-        if (!res.ok) {
+        try {
+            const data = await fetchAndCacheJson<Note[]>("notes", "/api/notes");
+            setError(null);
+            setNotes(asArray<Note>(data));
+        } catch {
             setError("No se pudieron cargar las notas.");
-            setNotes([]);
-            return;
         }
-        setError(null);
-        setNotes(asArray<Note>(data));
     }, []);
 
     useEffect(() => {

@@ -11,6 +11,8 @@ import {
     X,
     ArrowUpRight,
 } from "lucide-react";
+import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
+import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 
 type Client = { id: string; name: string };
 
@@ -51,9 +53,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ProyectosPage() {
-    const [projects, setProjects] = useState<Project[]>([]);
-    const [clients, setClients] = useState<Client[]>([]);
-    const [loading, setLoading] = useState(true);
+    const cached = readCachedJson<Partial<ProjectsPayload>>("projects:init");
+    const [projects, setProjects] = useState<Project[]>(() => Array.isArray(cached?.projects) ? cached.projects : []);
+    const [clients, setClients] = useState<Client[]>(() => Array.isArray(cached?.clients) ? cached.clients : []);
+    const [loading, setLoading] = useState(!cached);
     const [search, setSearch] = useState("");
 
     // Modal state
@@ -63,8 +66,7 @@ export default function ProyectosPage() {
     const [saving, setSaving] = useState(false);
 
     const fetchData = useCallback(async () => {
-        const res = await fetch("/api/projects/init");
-        const data = (await res.json()) as Partial<ProjectsPayload>;
+        const data = await fetchAndCacheJson<Partial<ProjectsPayload>>("projects:init", "/api/projects/init");
         setProjects(Array.isArray(data.projects) ? data.projects : []);
         setClients(Array.isArray(data.clients) ? data.clients : []);
     }, []);
@@ -178,9 +180,12 @@ export default function ProyectosPage() {
                         <GripVertical size={14} strokeWidth={1.5} className="shrink-0 text-neutral-700" />
                         <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <div className="min-w-0">
-                                <a href={`/proyectos/${project.id}`} className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors">
+                                <ProjectPrefetchLink
+                                    projectId={project.id}
+                                    className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors"
+                                >
                                     {project.name}
-                                </a>
+                                </ProjectPrefetchLink>
                                 <p className="text-[12px] text-neutral-500 mt-0.5">{project.client.name}</p>
                                 <p className="text-[12px] text-neutral-600 mt-0.5">
                                     Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}

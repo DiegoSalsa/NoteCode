@@ -77,17 +77,17 @@ async function sendPasswordLink(email: string, userId: string, purpose: typeof S
   const baseUrl = await getBaseUrl();
   const url = `${baseUrl}/establecer-clave?token=${encodeURIComponent(token)}`;
   const isReset = purpose === RESET_PASSWORD;
-  const subject = isReset ? "Recupera tu clave de PuroCode" : "Configura tu clave de PuroCode";
+  const subject = isReset ? "Recupera tu clave de NoteCode" : "Configura tu clave de NoteCode";
   const intro = isReset
     ? "Recibimos una solicitud para recuperar tu clave."
-    : "Tu acceso a PuroCode esta listo. Configura una clave segura para entrar.";
+    : "Tu acceso a NoteCode esta listo. Configura una clave segura para entrar.";
 
   await sendEmail({
     to: email,
     subject,
     html: `
       <div style="font-family:Inter,Arial,sans-serif;line-height:1.5;color:#171717">
-        <h1 style="font-size:20px;margin:0 0 12px">PuroCode</h1>
+        <h1 style="font-size:20px;margin:0 0 12px">NoteCode</h1>
         <p>${intro}</p>
         <p>Este enlace vence en 30 minutos y solo puede usarse una vez.</p>
         <p>

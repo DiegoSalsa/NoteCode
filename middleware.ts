@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = ["/", "/establecer-clave"];
-const SESSION_COOKIE_NAME = "purocode_session";
+const SESSION_COOKIE_NAME = "notecode_session";
 
 let cachedSecret: string | undefined;
 let cachedKeyPromise: Promise<CryptoKey> | null = null;

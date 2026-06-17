@@ -19,7 +19,7 @@ export default function LoginPage() {
           </div>
           <div>
             <h1 className="text-[24px] font-semibold tracking-tight text-neutral-100">
-              PuroCode
+              NoteCode
             </h1>
             <p className="mt-1 text-[14px] leading-relaxed text-neutral-400">
               Ingresa con tu correo interno. Si es tu primer acceso, te enviaremos un enlace seguro.
@@ -41,7 +41,7 @@ export default function LoginPage() {
               readOnly={Boolean(isPasswordStep)}
               defaultValue={state.email ?? ""}
               className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none transition-colors placeholder:text-neutral-600 read-only:text-neutral-400 focus:border-white/20"
-              placeholder="email@purocode.com"
+              placeholder="email@notecode.com"
             />
           </div>
 

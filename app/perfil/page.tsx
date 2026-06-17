@@ -65,7 +65,7 @@ export default async function ProfilePage() {
       <section className="space-y-1">
         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Perfil</h1>
         <p className="text-[14px] text-neutral-400">
-          Personaliza tu sesion y guarda claves personales separadas de PuroCode.
+          Personaliza tu sesion y guarda claves personales separadas de NoteCode.
         </p>
       </section>
 

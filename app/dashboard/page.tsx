@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
 
 type ProjectWithClient = {
     id: string;
@@ -149,7 +150,7 @@ export default async function DashboardPage() {
             {/* Header */}
             <section className="space-y-2">
                 <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">
-                    Bienvenido, {profile.displayName || "PuroCoder"}
+                    Bienvenido, {profile.displayName || "NoteCoder"}
                 </h1>
                 <p className="text-[15px] text-neutral-400 leading-relaxed max-w-2xl">
                     {profile.age
@@ -223,9 +224,12 @@ export default async function DashboardPage() {
 
                             <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <div className="min-w-0">
-                                    <Link href={`/proyectos/${project.id}`} className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors">
+                                    <ProjectPrefetchLink
+                                        projectId={project.id}
+                                        className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors"
+                                    >
                                         {project.name}
-                                    </Link>
+                                    </ProjectPrefetchLink>
                                     <p className="text-[12px] text-neutral-500 mt-0.5">
                                         {project.client.name}
                                     </p>

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
 import { revealCredential } from "@/app/actions/credentials";
+import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 import {
     ArrowLeft,
     Eye,
@@ -110,13 +111,14 @@ function PriorityBadge({ priority }: { priority: string }) {
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
-    const [project, setProject] = useState<ProjectData | null>(null);
-    const [statusLogs, setStatusLogs] = useState<StatusLog[]>([]);
-    const [requirements, setRequirements] = useState<Requirement[]>([]);
-    const [techs, setTechs] = useState<Tech[]>([]);
-    const [creds, setCreds] = useState<Credential[]>([]);
-    const [notes, setNotes] = useState<ProjectNote[]>([]);
-    const [loading, setLoading] = useState(true);
+    const cached = readCachedJson<ProjectDetailPayload>(`project:${id}`);
+    const [project, setProject] = useState<ProjectData | null>(() => cached?.project ?? null);
+    const [statusLogs, setStatusLogs] = useState<StatusLog[]>(() => asArray<StatusLog>(cached?.statusLogs));
+    const [requirements, setRequirements] = useState<Requirement[]>(() => asArray<Requirement>(cached?.requirements));
+    const [techs, setTechs] = useState<Tech[]>(() => asArray<Tech>(cached?.techs));
+    const [creds, setCreds] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
+    const [notes, setNotes] = useState<ProjectNote[]>(() => asArray<ProjectNote>(cached?.notes));
+    const [loading, setLoading] = useState(!cached);
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
     const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 
@@ -147,19 +149,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [noteContent, setNoteContent] = useState("");
 
     const fetchAll = useCallback(async () => {
-        const res = await fetch(`/api/projects/${id}`);
-        if (!res.ok) {
+        try {
+            const data = await fetchAndCacheJson<ProjectDetailPayload>(`project:${id}`, `/api/projects/${id}`);
+            setProject(data.project);
+            setStatusLogs(asArray<StatusLog>(data.statusLogs));
+            setRequirements(asArray<Requirement>(data.requirements));
+            setTechs(asArray<Tech>(data.techs));
+            setCreds(asArray<Credential>(data.credentials));
+            setNotes(asArray<ProjectNote>(data.notes));
+        } catch {
             setProject(null);
-            return;
         }
-
-        const data = (await res.json()) as ProjectDetailPayload;
-        setProject(data.project);
-        setStatusLogs(asArray<StatusLog>(data.statusLogs));
-        setRequirements(asArray<Requirement>(data.requirements));
-        setTechs(asArray<Tech>(data.techs));
-        setCreds(asArray<Credential>(data.credentials));
-        setNotes(asArray<ProjectNote>(data.notes));
     }, [id]);
 
     useEffect(() => {

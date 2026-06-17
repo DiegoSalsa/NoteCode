@@ -4,13 +4,13 @@ type CacheEntry<T> = {
 };
 
 const globalForCache = globalThis as unknown as {
-  purocodeCache?: Map<string, CacheEntry<unknown>>;
+  notecodeCache?: Map<string, CacheEntry<unknown>>;
 };
 
-const cache = globalForCache.purocodeCache ?? new Map<string, CacheEntry<unknown>>();
+const cache = globalForCache.notecodeCache ?? new Map<string, CacheEntry<unknown>>();
 
 if (process.env.NODE_ENV !== "production") {
-  globalForCache.purocodeCache = cache;
+  globalForCache.notecodeCache = cache;
 }
 
 export async function cached<T>(

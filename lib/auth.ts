@@ -2,7 +2,7 @@ import { createHmac, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
-export const SESSION_COOKIE_NAME = "purocode_session";
+export const SESSION_COOKIE_NAME = "notecode_session";
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 const PASSWORD_KEY_LENGTH = 64;

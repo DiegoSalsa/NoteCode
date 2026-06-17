@@ -6,7 +6,7 @@ type SendEmailInput = {
 };
 
 function getFromEmail() {
-  return process.env.RESEND_FROM_EMAIL || "PuroCode <no-reply@purocode.cl>";
+  return process.env.RESEND_FROM_EMAIL || "NoteCode <no-reply@notecode.cl>";
 }
 
 export async function sendEmail({ to, subject, html, text }: SendEmailInput) {

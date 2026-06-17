@@ -4,7 +4,7 @@ import AppShell from "@/components/AppShell";
 import { getCurrentUser } from "@/lib/auth";
 
 export const metadata: Metadata = {
-    title: "PuroCode",
+    title: "NoteCode",
     description:
         "Sistema operativo interno para gestión de proyectos, notas y credenciales.",
 };

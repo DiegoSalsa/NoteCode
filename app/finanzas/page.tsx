@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, ArrowUpRight, ArrowDownRight, DollarSign } from "lucide-react";
+import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 
 type Invoice = {
     id: string;
@@ -40,8 +41,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function FinanzasPage() {
-    const [invoices, setInvoices] = useState<Invoice[]>([]);
-    const [loading, setLoading] = useState(true);
+    const cached = readCachedJson<Invoice[]>("invoices");
+    const [invoices, setInvoices] = useState<Invoice[]>(() => asArray<Invoice>(cached));
+    const [loading, setLoading] = useState(!cached);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
 
@@ -51,15 +53,13 @@ export default function FinanzasPage() {
     const [saving, setSaving] = useState(false);
 
     const fetchInvoices = useCallback(async () => {
-        const res = await fetch("/api/invoices");
-        const data = await res.json();
-        if (!res.ok) {
+        try {
+            const data = await fetchAndCacheJson<Invoice[]>("invoices", "/api/invoices");
+            setError(null);
+            setInvoices(asArray<Invoice>(data));
+        } catch {
             setError("No se pudieron cargar las finanzas.");
-            setInvoices([]);
-            return;
         }
-        setError(null);
-        setInvoices(asArray<Invoice>(data));
     }, []);
 
     useEffect(() => {

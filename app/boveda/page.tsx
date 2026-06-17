@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Eye, EyeOff, Plus, Search, Trash2, X } from "lucide-react";
 import { revealCredential } from "@/app/actions/credentials";
+import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 
 type Credential = {
   id: string;
@@ -33,9 +34,10 @@ function asArray<T>(value: unknown): T[] {
 }
 
 export default function BovedaPage() {
-  const [credentials, setCredentials] = useState<Credential[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = readCachedJson<Partial<VaultPayload>>("vault");
+  const [credentials, setCredentials] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
+  const [projects, setProjects] = useState<Project[]>(() => asArray<Project>(cached?.projects));
+  const [loading, setLoading] = useState(!cached);
   const [search, setSearch] = useState("");
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [modalOpen, setModalOpen] = useState(false);
@@ -43,8 +45,7 @@ export default function BovedaPage() {
   const [form, setForm] = useState({ projectId: "", name: "", username: "", password: "" });
 
   const fetchData = useCallback(async () => {
-    const res = await fetch("/api/vault");
-    const data = (await res.json()) as Partial<VaultPayload>;
+    const data = await fetchAndCacheJson<Partial<VaultPayload>>("vault", "/api/vault");
 
     const projectItems = asArray<Project>(data.projects);
     setCredentials(asArray<Credential>(data.credentials));

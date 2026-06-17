@@ -15,6 +15,8 @@ summary,
 [type="checkbox"],
 [type="radio"] {
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(255, 255, 255, 0.08);
 }
 
 button:disabled,
@@ -29,10 +31,32 @@ body {
     overflow-x: hidden;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[type="button"]:not(:disabled),
+[type="submit"]:not(:disabled) {
+    transition-property: transform, background-color, border-color, color, opacity, box-shadow;
+    transition-duration: 120ms;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+[type="button"]:not(:disabled):active,
+[type="submit"]:not(:disabled):active {
+    transform: scale(0.98);
+}
+
 @media (max-width: 640px) {
     input,
     select,
     textarea {
         font-size: 16px;
+    }
+
+    button,
+    [type="button"],
+    [type="submit"],
+    [role="button"] {
+        min-height: 44px;
     }
 }

@@ -12,13 +12,14 @@ import {
   User,
 } from "lucide-react";
 import { logout } from "@/app/actions/auth";
+import { prefetchJson } from "@/lib/client-cache";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Proyectos", href: "/proyectos", icon: FolderKanban },
-  { label: "Notas", href: "/notas", icon: NotebookPen },
-  { label: "Boveda", href: "/boveda", icon: ShieldCheck },
-  { label: "Finanzas", href: "/finanzas", icon: Coins },
+  { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init", api: "/api/projects/init" },
+  { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes", api: "/api/notes" },
+  { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault", api: "/api/vault" },
+  { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices", api: "/api/invoices" },
   { label: "Perfil", href: "/perfil", icon: User },
 ];
 
@@ -35,15 +36,21 @@ export default function Sidebar({ me }: { me: Me | null }) {
     return pathname.startsWith(href);
   }
 
+  function prefetchItem(item: (typeof navItems)[number]) {
+    if (item.cacheKey && item.api) {
+      prefetchJson(item.cacheKey, item.api);
+    }
+  }
+
   return (
     <>
     <aside className="fixed left-0 top-0 z-40 hidden h-screen w-60 flex-col border-r border-white/10 bg-neutral-950 md:flex">
       <div className="flex h-14 items-center gap-2.5 border-b border-white/10 px-5">
         <div className="flex h-7 w-7 items-center justify-center rounded bg-neutral-100">
-          <span className="text-sm font-extrabold text-neutral-950">P</span>
+          <span className="text-sm font-extrabold text-neutral-950">N</span>
         </div>
         <span className="text-[15px] font-semibold tracking-tight text-neutral-100">
-          PuroCode
+          NoteCode
         </span>
       </div>
 
@@ -56,6 +63,8 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <Link
               key={item.href}
               href={item.href}
+              onMouseEnter={() => prefetchItem(item)}
+              onTouchStart={() => prefetchItem(item)}
               className={`group flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
                 active
                   ? "bg-neutral-800 text-neutral-100"
@@ -85,7 +94,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <p className="truncate text-[13px] font-medium text-neutral-100">
               {me?.displayName || "Sesion activa"}
             </p>
-            <p className="truncate text-[11px] text-neutral-500">{me?.email || "purocode"}</p>
+            <p className="truncate text-[11px] text-neutral-500">{me?.email || "notecode"}</p>
           </div>
         </Link>
 
@@ -114,6 +123,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <Link
               key={item.href}
               href={item.href}
+              onTouchStart={() => prefetchItem(item)}
               className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 text-[10px] font-medium transition-colors ${
                 active
                   ? "bg-neutral-800 text-neutral-100"
