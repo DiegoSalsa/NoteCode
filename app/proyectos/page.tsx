@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { useDebounce } from "@/lib/use-debounce";
 
 type Client = { id: string; name: string };
 
@@ -31,6 +32,9 @@ type Project = {
 type ProjectsPayload = {
     projects: Project[];
     clients: Client[];
+    nextSkip: number;
+    hasMore: boolean;
+    total: number;
 };
 
 const STATUSES = ["Planificado", "En progreso", "Revisión", "Completado"];
@@ -53,11 +57,16 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ProyectosPage() {
-    const cached = readCachedJson<Partial<ProjectsPayload>>("projects:init");
+    const cached = readCachedJson<Partial<ProjectsPayload>>("projects:init::0:25");
     const [projects, setProjects] = useState<Project[]>(() => Array.isArray(cached?.projects) ? cached.projects : []);
     const [clients, setClients] = useState<Client[]>(() => Array.isArray(cached?.clients) ? cached.clients : []);
     const [loading, setLoading] = useState(!cached);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? projects.length);
+    const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
+    const [total, setTotal] = useState(cached?.total ?? projects.length);
     const [search, setSearch] = useState("");
+    const debouncedSearch = useDebounce(search);
 
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
@@ -65,15 +74,29 @@ export default function ProyectosPage() {
     const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
     const [saving, setSaving] = useState(false);
 
-    const fetchData = useCallback(async () => {
-        const data = await fetchAndCacheJson<Partial<ProjectsPayload>>("projects:init", "/api/projects/init");
-        setProjects(Array.isArray(data.projects) ? data.projects : []);
+    const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
+        const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "25" });
+        const key = `projects:init:${debouncedSearch}:${skip}:25`;
+        const data = await fetchAndCacheJson<Partial<ProjectsPayload>>(key, `/api/projects/init?${params.toString()}`);
+        const items = Array.isArray(data.projects) ? data.projects : [];
+        setProjects((current) => append ? [...current, ...items] : items);
         setClients(Array.isArray(data.clients) ? data.clients : []);
-    }, []);
+        setNextSkip(data.nextSkip ?? skip + items.length);
+        setHasMore(Boolean(data.hasMore));
+        setTotal(data.total ?? items.length);
+        setLoading(false);
+        setLoadingMore(false);
+    }, [debouncedSearch]);
 
     useEffect(() => {
-        fetchData().finally(() => setLoading(false));
+        setLoading(true);
+        fetchData();
     }, [fetchData]);
+
+    async function loadMore() {
+        setLoadingMore(true);
+        await fetchData({ append: true, skip: nextSkip });
+    }
 
     function openCreate() {
         setEditing(null);
@@ -119,10 +142,7 @@ export default function ProyectosPage() {
         await fetchData();
     }
 
-    const filtered = projects.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.client.name.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = projects;
     const clientSuggestions = form.clientName.trim()
         ? clients.filter((client) => client.name.toLowerCase().includes(form.clientName.toLowerCase())).slice(0, 5)
         : [];
@@ -145,7 +165,7 @@ export default function ProyectosPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Proyectos</h1>
-                        <p className="text-[13px] text-neutral-500 mt-1">{projects.length} proyectos activos</p>
+                        <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos activos</p>
                     </div>
                     <button
                         onClick={openCreate}
@@ -221,6 +241,17 @@ export default function ProyectosPage() {
                     </div>
                 )}
             </div>
+
+            {hasMore && (
+                <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-4 py-2.5 text-[13px] font-medium text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-60"
+                >
+                    {loadingMore ? "Cargando..." : "Cargar mas"}
+                </button>
+            )}
 
             {/* Modal */}
             {modalOpen && (

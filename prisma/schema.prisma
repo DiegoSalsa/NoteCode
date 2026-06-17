@@ -18,6 +18,7 @@ model Client {
   updatedAt DateTime  @updatedAt @map("updated_at")
   projects  Project[]
 
+  @@index([name])
   @@map("clients")
 }
 
@@ -40,6 +41,10 @@ model Project {
   notes            ProjectNote[]
   invoice          Invoice?
 
+  @@index([clientId])
+  @@index([status])
+  @@index([updatedAt])
+  @@index([status, updatedAt])
   @@map("projects")
 }
 
@@ -51,6 +56,9 @@ model ProjectStatusLog {
   note      String?
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
   @@map("project_status_logs")
 }
 
@@ -65,6 +73,9 @@ model ProjectRequirement {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  @@index([projectId])
+  @@index([completed])
+  @@index([priority])
   @@map("project_requirements")
 }
 
@@ -77,6 +88,8 @@ model ProjectTech {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([projectId])
+  @@index([category])
   @@map("project_techs")
 }
 
@@ -93,6 +106,8 @@ model ProjectCredential {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([projectId])
+  @@index([service])
   @@map("project_credentials")
 }
 
@@ -105,6 +120,8 @@ model ProjectNote {
   updatedAt DateTime @updatedAt @map("updated_at")
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([projectId])
+  @@index([updatedAt])
   @@map("project_notes")
 }
 
@@ -119,6 +136,8 @@ model Credential {
   updatedAt  DateTime   @updatedAt @map("updated_at")
   auditLogs  AuditLog[]
 
+  @@index([projectId])
+  @@index([updatedAt])
   @@map("credentials")
 }
 
@@ -130,6 +149,9 @@ model AuditLog {
   credential   Credential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
   createdAt    DateTime    @default(now()) @map("created_at")
 
+  @@index([userId])
+  @@index([credentialId])
+  @@index([createdAt])
   @@map("audit_logs")
 }
 
@@ -146,6 +168,7 @@ model UserProfile {
   personalSecrets PersonalSecret[]
   authTokens      AuthToken[]
 
+  @@index([email])
   @@map("user_profiles")
 }
 
@@ -174,6 +197,8 @@ model PersonalSecret {
   createdAt  DateTime    @default(now()) @map("created_at")
   updatedAt  DateTime    @updatedAt @map("updated_at")
 
+  @@index([userId])
+  @@index([updatedAt])
   @@map("personal_secrets")
 }
 
@@ -190,6 +215,10 @@ model Invoice {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  @@index([status])
+  @@index([createdAt])
+  @@index([dueDate])
+  @@index([client])
   @@map("invoices")
 }
 
@@ -201,5 +230,8 @@ model Note {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([folder])
+  @@index([updatedAt])
+  @@index([createdAt])
   @@map("notes")
 }

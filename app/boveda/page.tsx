@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Copy, Eye, EyeOff, Plus, Search, Trash2, X } from "lucide-react";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { useDebounce } from "@/lib/use-debounce";
 
 type Credential = {
   id: string;
@@ -27,6 +28,9 @@ type Project = {
 type VaultPayload = {
   credentials: Credential[];
   projects: Project[];
+  nextSkip: number;
+  hasMore: boolean;
+  total: number;
 };
 
 function asArray<T>(value: unknown): T[] {
@@ -34,31 +38,50 @@ function asArray<T>(value: unknown): T[] {
 }
 
 export default function BovedaPage() {
-  const cached = readCachedJson<Partial<VaultPayload>>("vault");
+  const cached = readCachedJson<Partial<VaultPayload>>("vault::0:50");
   const [credentials, setCredentials] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
   const [projects, setProjects] = useState<Project[]>(() => asArray<Project>(cached?.projects));
   const [loading, setLoading] = useState(!cached);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? credentials.length);
+  const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
+  const [total, setTotal] = useState(cached?.total ?? credentials.length);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ projectId: "", name: "", username: "", password: "" });
 
-  const fetchData = useCallback(async () => {
-    const data = await fetchAndCacheJson<Partial<VaultPayload>>("vault", "/api/vault");
+  const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
+    const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "50" });
+    const key = `vault:${debouncedSearch}:${skip}:50`;
+    const data = await fetchAndCacheJson<Partial<VaultPayload>>(key, `/api/vault?${params.toString()}`);
 
     const projectItems = asArray<Project>(data.projects);
-    setCredentials(asArray<Credential>(data.credentials));
+    const credentialItems = asArray<Credential>(data.credentials);
+    setCredentials((current) => append ? [...current, ...credentialItems] : credentialItems);
     setProjects(projectItems);
+    setNextSkip(data.nextSkip ?? skip + credentialItems.length);
+    setHasMore(Boolean(data.hasMore));
+    setTotal(data.total ?? credentialItems.length);
     setForm((current) => ({
       ...current,
       projectId: current.projectId || projectItems[0]?.id || "",
     }));
-  }, []);
+    setLoading(false);
+    setLoadingMore(false);
+  }, [debouncedSearch]);
 
   useEffect(() => {
-    fetchData().finally(() => setLoading(false));
+    setLoading(true);
+    fetchData();
   }, [fetchData]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    await fetchData({ append: true, skip: nextSkip });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -104,13 +127,7 @@ export default function BovedaPage() {
     await navigator.clipboard.writeText(secret);
   }
 
-  const query = search.toLowerCase();
-  const filtered = credentials.filter((credential) =>
-    credential.name.toLowerCase().includes(query) ||
-    credential.service.toLowerCase().includes(query) ||
-    credential.clientName.toLowerCase().includes(query) ||
-    credential.username.toLowerCase().includes(query)
-  );
+  const filtered = credentials;
 
   if (loading) {
     return (
@@ -131,7 +148,7 @@ export default function BovedaPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Boveda</h1>
-            <p className="mt-1 text-[13px] text-neutral-500">{credentials.length} credenciales de proyectos</p>
+            <p className="mt-1 text-[13px] text-neutral-500">{total} credenciales de proyectos</p>
           </div>
           <button
             onClick={() => setModalOpen(true)}
@@ -189,6 +206,17 @@ export default function BovedaPage() {
           </div>
         )}
       </div>
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loadingMore}
+          className="w-full rounded-lg border border-white/10 bg-neutral-950 px-4 py-2.5 text-[13px] font-medium text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-60"
+        >
+          {loadingMore ? "Cargando..." : "Cargar mas"}
+        </button>
+      )}
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">

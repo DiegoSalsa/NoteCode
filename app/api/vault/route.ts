@@ -1,15 +1,35 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/server-cache";
 
 const MASKED_SECRET = "************";
 
-export async function GET() {
+const DEFAULT_TAKE = 50;
+const MAX_TAKE = 100;
+
+export async function GET(request: NextRequest) {
   try {
-    const data = await cached("vault", 30_000, async () => {
-      const [credentials, projects] = await Promise.all([
+    const { searchParams } = new URL(request.url);
+    const q = searchParams.get("q")?.trim() || "";
+    const skip = Math.max(0, Number(searchParams.get("skip") ?? "0") || 0);
+    const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
+    const where = q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" as const } },
+            { username: { contains: q, mode: "insensitive" as const } },
+            { project: { name: { contains: q, mode: "insensitive" as const } } },
+            { project: { client: { name: { contains: q, mode: "insensitive" as const } } } },
+          ],
+        }
+      : {};
+    const data = await cached(`vault:${q}:${skip}:${take}`, 30_000, async () => {
+      const [credentials, projects, total] = await Promise.all([
         prisma.credential.findMany({
+          where,
           orderBy: { updatedAt: "desc" },
+          skip,
+          take,
           select: {
             id: true,
             projectId: true,
@@ -33,6 +53,7 @@ export async function GET() {
             client: { select: { name: true } },
           },
         }),
+        prisma.credential.count({ where }),
       ]);
 
       return {
@@ -46,6 +67,9 @@ export async function GET() {
           password: MASKED_SECRET,
         })),
         projects,
+        nextSkip: skip + credentials.length,
+        hasMore: skip + credentials.length < total,
+        total,
       };
     });
 

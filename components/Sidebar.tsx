@@ -16,10 +16,10 @@ import { prefetchJson } from "@/lib/client-cache";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init", api: "/api/projects/init" },
-  { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes", api: "/api/notes" },
-  { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault", api: "/api/vault" },
-  { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices", api: "/api/invoices" },
+  { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init::0:25", api: "/api/projects/init?q=&skip=0&take=25" },
+  { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes:::0:30", api: "/api/notes?q=&folder=&skip=0&take=30" },
+  { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault::0:50", api: "/api/vault?q=&skip=0&take=50" },
+  { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices::0:30", api: "/api/invoices?q=&skip=0&take=30" },
   { label: "Perfil", href: "/perfil", icon: User },
 ];
 

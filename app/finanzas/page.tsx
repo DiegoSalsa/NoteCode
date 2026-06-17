@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, ArrowUpRight, ArrowDownRight, DollarSign } from "lucide-react";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { useDebounce } from "@/lib/use-debounce";
 
 type Invoice = {
     id: string;
@@ -18,6 +19,18 @@ type Invoice = {
 };
 
 const STATUSES = ["Pendiente", "Pagado", "Vencido", "Cancelado"];
+
+type InvoicesPayload = {
+    items: Invoice[];
+    nextSkip: number;
+    hasMore: boolean;
+    total: number;
+    summary: {
+        totalAmount: number;
+        pendingAmount: number;
+        paidAmount: number;
+    };
+};
 
 function asArray<T>(value: unknown): T[] {
     return Array.isArray(value) ? value : [];
@@ -41,30 +54,52 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function FinanzasPage() {
-    const cached = readCachedJson<Invoice[]>("invoices");
-    const [invoices, setInvoices] = useState<Invoice[]>(() => asArray<Invoice>(cached));
+    const cached = readCachedJson<InvoicesPayload>("invoices::0:30");
+    const [invoices, setInvoices] = useState<Invoice[]>(() => asArray<Invoice>(cached?.items));
     const [loading, setLoading] = useState(!cached);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? invoices.length);
+    const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
+    const [total, setTotal] = useState(cached?.total ?? invoices.length);
+    const [summary, setSummary] = useState(cached?.summary ?? { totalAmount: 0, pendingAmount: 0, paidAmount: 0 });
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
+    const debouncedSearch = useDebounce(search);
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Invoice | null>(null);
     const [form, setForm] = useState({ number: "", client: "", amount: "", status: "Pendiente", dueDate: "" });
     const [saving, setSaving] = useState(false);
 
-    const fetchInvoices = useCallback(async () => {
+    const fetchInvoices = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
-            const data = await fetchAndCacheJson<Invoice[]>("invoices", "/api/invoices");
+            const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "30" });
+            const key = `invoices:${debouncedSearch}:${skip}:30`;
+            const data = await fetchAndCacheJson<InvoicesPayload>(key, `/api/invoices?${params.toString()}`);
+            const items = asArray<Invoice>(data.items);
             setError(null);
-            setInvoices(asArray<Invoice>(data));
+            setInvoices((current) => append ? [...current, ...items] : items);
+            setNextSkip(data.nextSkip ?? skip + items.length);
+            setHasMore(Boolean(data.hasMore));
+            setTotal(data.total ?? items.length);
+            setSummary(data.summary ?? { totalAmount: 0, pendingAmount: 0, paidAmount: 0 });
         } catch {
             setError("No se pudieron cargar las finanzas.");
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
         }
-    }, []);
+    }, [debouncedSearch]);
 
     useEffect(() => {
-        fetchInvoices().finally(() => setLoading(false));
+        setLoading(true);
+        fetchInvoices();
     }, [fetchInvoices]);
+
+    async function loadMore() {
+        setLoadingMore(true);
+        await fetchInvoices({ append: true, skip: nextSkip });
+    }
 
     function openCreate() {
         setEditing(null);
@@ -120,16 +155,12 @@ export default function FinanzasPage() {
         await fetchInvoices();
     }
 
-    const filtered = invoices.filter((i) =>
-        i.number.toLowerCase().includes(search.toLowerCase()) ||
-        i.client.toLowerCase().includes(search.toLowerCase())
-    );
-
-    const totalAmount = invoices.reduce((sum, i) => sum + i.amount, 0);
+    const filtered = invoices;
+    const totalAmount = summary.totalAmount;
     const netAmount = totalAmount / 1.19;
     const vatAmount = totalAmount - netAmount;
-    const pendingAmount = invoices.filter((i) => i.status === "Pendiente").reduce((sum, i) => sum + i.amount, 0);
-    const paidAmount = invoices.filter((i) => i.status === "Pagado").reduce((sum, i) => sum + i.amount, 0);
+    const pendingAmount = summary.pendingAmount;
+    const paidAmount = summary.paidAmount;
 
     if (loading) {
         return (
@@ -148,7 +179,7 @@ export default function FinanzasPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Finanzas</h1>
-                        <p className="text-[13px] text-neutral-500 mt-1">{invoices.length} facturas registradas</p>
+                        <p className="text-[13px] text-neutral-500 mt-1">{total} facturas registradas</p>
                         {error && <p className="mt-2 text-[13px] text-red-300">{error}</p>}
                     </div>
                     <button
@@ -257,6 +288,17 @@ export default function FinanzasPage() {
                     </div>
                 )}
             </div>
+
+            {hasMore && (
+                <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-4 py-2.5 text-[13px] font-medium text-neutral-300 transition-colors hover:bg-white/5 disabled:opacity-60"
+                >
+                    {loadingMore ? "Cargando..." : "Cargar mas"}
+                </button>
+            )}
 
             {modalOpen && (
                 <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">

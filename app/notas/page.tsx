@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { useDebounce } from "@/lib/use-debounce";
 
 type Note = {
     id: string;
@@ -15,16 +16,28 @@ type Note = {
 
 const FOLDERS = ["General", "Procesos", "Tech", "Reuniones", "Ideas"];
 
+type NotesPayload = {
+    items: Note[];
+    nextSkip: number;
+    hasMore: boolean;
+    total: number;
+};
+
 function asArray<T>(value: unknown): T[] {
     return Array.isArray(value) ? value : [];
 }
 
 export default function NotasPage() {
-    const cached = readCachedJson<Note[]>("notes");
-    const [notes, setNotes] = useState<Note[]>(() => asArray<Note>(cached));
+    const cached = readCachedJson<NotesPayload>("notes:::0:30");
+    const [notes, setNotes] = useState<Note[]>(() => asArray<Note>(cached?.items));
     const [loading, setLoading] = useState(!cached);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? notes.length);
+    const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
+    const [total, setTotal] = useState(cached?.total ?? notes.length);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
+    const debouncedSearch = useDebounce(search);
     const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
     const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
 
@@ -33,19 +46,39 @@ export default function NotasPage() {
     const [form, setForm] = useState({ title: "", content: "", folder: "General" });
     const [saving, setSaving] = useState(false);
 
-    const fetchNotes = useCallback(async () => {
+    const fetchNotes = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
-            const data = await fetchAndCacheJson<Note[]>("notes", "/api/notes");
+            const params = new URLSearchParams({
+                q: debouncedSearch,
+                folder: selectedFolder ?? "",
+                skip: String(skip),
+                take: "30",
+            });
+            const key = `notes:${debouncedSearch}:${selectedFolder ?? ""}:${skip}:30`;
+            const data = await fetchAndCacheJson<NotesPayload>(key, `/api/notes?${params.toString()}`);
+            const items = asArray<Note>(data.items);
             setError(null);
-            setNotes(asArray<Note>(data));
+            setNotes((current) => append ? [...current, ...items] : items);
+            setNextSkip(data.nextSkip ?? skip + items.length);
+            setHasMore(Boolean(data.hasMore));
+            setTotal(data.total ?? items.length);
         } catch {
             setError("No se pudieron cargar las notas.");
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
         }
-    }, []);
+    }, [debouncedSearch, selectedFolder]);
 
     useEffect(() => {
-        fetchNotes().finally(() => setLoading(false));
+        setLoading(true);
+        fetchNotes();
     }, [fetchNotes]);
+
+    async function loadMore() {
+        setLoadingMore(true);
+        await fetchNotes({ append: true, skip: nextSkip });
+    }
 
     function openCreate() {
         setEditing(null);
@@ -93,12 +126,7 @@ export default function NotasPage() {
     }
 
     const folders = [...new Set([...FOLDERS, ...notes.map(n => n.folder)])];
-    const filtered = notes.filter((n) => {
-        const matchSearch = n.title.toLowerCase().includes(search.toLowerCase()) ||
-            n.content.toLowerCase().includes(search.toLowerCase());
-        const matchFolder = selectedFolder ? n.folder === selectedFolder : true;
-        return matchSearch && matchFolder;
-    });
+    const filtered = notes;
 
     const selectedNote = selectedNoteId ? notes.find(n => n.id === selectedNoteId) : null;
 
@@ -153,7 +181,7 @@ export default function NotasPage() {
                     </div>
                 </div>
                 <div className="px-4 py-3 border-t border-white/10">
-                    <p className="text-[11px] text-neutral-600">{notes.length} notas</p>
+                    <p className="text-[11px] text-neutral-600">{total} notas</p>
                 </div>
             </div>
 
@@ -195,6 +223,18 @@ export default function NotasPage() {
                         <p className="px-4 py-8 text-center text-[13px] text-neutral-500">
                             {search ? "Sin resultados." : "No hay notas en esta carpeta."}
                         </p>
+                    )}
+                    {hasMore && (
+                        <div className="p-3">
+                            <button
+                                type="button"
+                                onClick={loadMore}
+                                disabled={loadingMore}
+                                className="w-full rounded-md border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] font-medium text-neutral-300 hover:bg-white/5 disabled:opacity-60"
+                            >
+                                {loadingMore ? "Cargando..." : "Cargar mas"}
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
