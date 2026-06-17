@@ -263,16 +263,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     if (loading) {
         return (
-            <div className="mx-auto max-w-5xl px-8 py-10 space-y-4">
+            <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
                 <div className="h-6 w-32 rounded bg-neutral-800 animate-pulse" />
-                <div className="h-10 w-72 rounded bg-neutral-800 animate-pulse" />
+                <div className="h-10 w-full max-w-72 rounded bg-neutral-800 animate-pulse" />
             </div>
         );
     }
 
     if (!project) {
         return (
-            <div className="mx-auto max-w-5xl px-8 py-10">
+            <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
                 <p className="text-neutral-400">Proyecto no encontrado.</p>
                 <Link href="/proyectos" className="text-sky-400 text-sm mt-2 inline-block">← Volver a proyectos</Link>
             </div>
@@ -288,16 +288,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     ];
 
     return (
-        <div className="mx-auto max-w-5xl px-8 py-10 space-y-8">
+        <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
             {/* Header */}
             <div className="space-y-4">
                 <Link href="/proyectos" className="inline-flex items-center gap-1.5 text-[13px] text-neutral-400 hover:text-neutral-200 transition-colors">
                     <ArrowLeft size={14} strokeWidth={1.5} />
                     Proyectos
                 </Link>
-                <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                        <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">{project.name}</h1>
+                        <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">{project.name}</h1>
                         <p className="text-[14px] text-neutral-500 mt-1">{project.client.name}</p>
                         <p className="text-[13px] text-neutral-500 mt-1">
                             Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}
@@ -306,7 +306,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                             <p className="text-[14px] text-neutral-400 mt-2 max-w-2xl">{project.description}</p>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                         <StatusBadge status={project.status} />
                         <button
                             onClick={() => { setNewStatus(project.status); setStatusNote(""); setStatusOpen(true); }}
@@ -320,7 +320,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-0 border-b border-white/10">
+            <div className="-mx-4 overflow-x-auto border-b border-white/10 px-4 sm:mx-0 sm:px-0">
+                <div className="flex min-w-max gap-0">
                 {tabs.map((t) => (
                     <button
                         key={t.key}
@@ -335,6 +336,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         {tab === t.key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-100" />}
                     </button>
                 ))}
+                </div>
             </div>
 
             {/* Tab: Overview */}
@@ -371,7 +373,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {/* Tab: Requirements */}
             {tab === "requirements" && (
                 <div className="space-y-4">
-                    <div className="flex gap-2">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
                         <input
                             value={reqDesc}
                             onChange={e => setReqDesc(e.target.value)}
@@ -385,13 +387,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <select value={reqPriority} onChange={e => setReqPriority(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
-                        <button onClick={addRequirement} className="rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
+                        <button onClick={addRequirement} className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
                             <Plus size={14} strokeWidth={2} />
                         </button>
                     </div>
                     <div className="space-y-1">
                         {requirements.map(req => (
-                            <div key={req.id} className="flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/[0.02] group">
+                            <div key={req.id} className="group flex items-start gap-3 rounded-lg px-3 py-3 hover:bg-white/[0.02] sm:items-center sm:px-4 sm:py-2.5">
                                 <button onClick={() => toggleRequirement(req.id, !req.completed)} className="shrink-0">
                                     <div className={`h-4 w-4 rounded border ${req.completed ? "bg-neutral-100 border-neutral-100 flex items-center justify-center" : "border-white/20"}`}>
                                         {req.completed && <Check size={10} strokeWidth={3} className="text-neutral-950" />}
@@ -402,7 +404,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 </span>
                                 <span className="text-[11px] text-neutral-600">{req.category}</span>
                                 <PriorityBadge priority={req.priority} />
-                                <button onClick={() => deleteRequirement(req.id)} className="p-1 rounded text-neutral-700 hover:text-red-400 opacity-0 group-hover:opacity-100">
+                                <button onClick={() => deleteRequirement(req.id)} className="rounded p-1 text-neutral-700 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
                                     <Trash2 size={12} strokeWidth={1.5} />
                                 </button>
                             </div>
@@ -414,7 +416,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {/* Tab: Technologies */}
             {tab === "techs" && (
                 <div className="space-y-4">
-                    <div className="flex gap-2">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                         <input
                             value={techName}
                             onChange={e => setTechName(e.target.value)}
@@ -425,7 +427,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <select value={techCat} onChange={e => setTechCat(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {TECH_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <button onClick={addTech} className="rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
+                        <button onClick={addTech} className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
                             <Plus size={14} strokeWidth={2} />
                         </button>
                     </div>
@@ -440,7 +442,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                         {catTechs.map(t => (
                                             <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-neutral-800 px-3 py-1.5 text-[13px] text-neutral-200 group">
                                                 {t.name}
-                                                <button onClick={() => deleteTech(t.id)} className="text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => deleteTech(t.id)} className="text-neutral-600 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
                                                     <X size={11} strokeWidth={2} />
                                                 </button>
                                             </span>
@@ -462,7 +464,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </button>
                     <div className="space-y-1">
                         {creds.map(c => (
-                            <div key={c.id} className="flex items-center gap-4 px-4 py-3 rounded-lg border border-white/5 bg-neutral-900 group">
+                            <div key={c.id} className="group flex flex-col gap-3 rounded-lg border border-white/5 bg-neutral-900 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                         <h4 className="text-[14px] font-medium text-neutral-200">{c.title}</h4>
@@ -470,16 +472,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                     </div>
                                     <p className="text-[12px] text-neutral-500">{c.service} / {c.username}</p>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-2 bg-neutral-950 border border-white/10 rounded-md px-3 py-1.5">
-                                        <span className="text-[13px] font-mono text-neutral-300 select-all">
+                                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                                    <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 py-2 sm:py-1.5">
+                                        <span className="min-w-0 flex-1 truncate text-[13px] font-mono text-neutral-300 select-all sm:flex-none">
                                             {revealed.has(c.id) ? revealedSecrets[c.id] : "************"}
                                         </span>
                                         <button onClick={() => toggleReveal(c.id)} className="text-neutral-500 hover:text-neutral-300">
                                             {revealed.has(c.id) ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}
                                         </button>
                                     </div>
-                                    <button onClick={() => deleteCredential(c.id)} className="p-1.5 rounded text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100">
+                                    <button onClick={() => deleteCredential(c.id)} className="rounded p-1.5 text-neutral-600 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
                                         <Trash2 size={13} strokeWidth={1.5} />
                                     </button>
                                 </div>
@@ -489,8 +491,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </div>
 
                     {credOpen && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                            <div className="w-full max-w-md rounded-xl border border-white/10 bg-neutral-900 p-6">
+                        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                            <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 sm:p-6">
                                 <div className="flex items-center justify-between mb-6">
                                     <h2 className="text-[17px] font-semibold text-neutral-100">Nueva Credencial</h2>
                                     <button onClick={() => setCredOpen(false)} className="p-1"><X size={16} /></button>
@@ -520,7 +522,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <div className="space-y-3">
                         {notes.map(n => (
                             <div key={n.id} className="rounded-lg border border-white/5 bg-neutral-900 p-5 group hover:border-white/10 transition-colors">
-                                <div className="flex items-start justify-between">
+                                <div className="flex items-start justify-between gap-3">
                                     <div className="flex-1">
                                         <h4 className="text-[15px] font-semibold text-neutral-100">{n.title}</h4>
                                         <pre className="text-[13px] text-neutral-400 whitespace-pre-wrap mt-2 font-sans">{n.content || "Sin contenido"}</pre>
@@ -528,7 +530,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                             Actualizado: {new Date(n.updatedAt).toLocaleString("es-MX")}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                                         <button onClick={() => { setNoteTitle(n.title); setNoteContent(n.content); setNoteOpen(true); }} className="p-1.5 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
                                             <Pencil size={13} strokeWidth={1.5} />
                                         </button>
@@ -543,8 +545,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </div>
 
                     {noteOpen && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                            <div className="w-full max-w-lg rounded-xl border border-white/10 bg-neutral-900 p-6">
+                        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                            <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 sm:p-6">
                                 <div className="flex items-center justify-between mb-6">
                                     <h2 className="text-[17px] font-semibold text-neutral-100">Nueva Nota</h2>
                                     <button onClick={() => setNoteOpen(false)} className="p-1"><X size={16} /></button>
@@ -562,14 +564,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
             {/* Status Update Modal */}
             {statusOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-sm rounded-xl border border-white/10 bg-neutral-900 p-6">
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                    <div className="max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 sm:p-6">
                         <h2 className="text-[17px] font-semibold text-neutral-100 mb-4">Actualizar Estado</h2>
                         <select value={newStatus} onChange={e => setNewStatus(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 mb-4">
                             {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                         <textarea rows={2} placeholder="Nota opcional..." value={statusNote} onChange={e => setStatusNote(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 mb-4 resize-none" />
-                        <div className="flex gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row">
                             <button onClick={() => setStatusOpen(false)} className="flex-1 rounded-lg border border-white/10 px-4 py-2 text-[13px] text-neutral-300">Cancelar</button>
                             <button onClick={updateStatus} className="flex-1 rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950">Actualizar</button>
                         </div>

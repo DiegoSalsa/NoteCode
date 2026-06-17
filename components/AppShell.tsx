@@ -25,7 +25,7 @@ export default function AppShell({
   return (
     <>
       <Sidebar me={user} />
-      <main className="ml-60 min-h-screen">{children}</main>
+      <main className="min-h-screen pb-20 md:ml-60 md:pb-0">{children}</main>
     </>
   );
 }

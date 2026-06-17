@@ -138,10 +138,10 @@ export default async function DashboardPage() {
     ];
 
     return (
-        <div className="mx-auto max-w-5xl px-8 py-10 space-y-14">
+        <div className="mx-auto max-w-5xl space-y-10 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10 lg:space-y-14">
             {/* Header */}
             <section className="space-y-2">
-                <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">
+                <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">
                     Bienvenido, {profile.displayName || "PuroCoder"}
                 </h1>
                 <p className="text-[15px] text-neutral-400 leading-relaxed max-w-2xl">
@@ -153,7 +153,7 @@ export default async function DashboardPage() {
 
             {/* Summary Cards */}
             <section>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     {summaryItems.map((item) => {
                         const Icon = item.icon;
                         return (
@@ -183,7 +183,7 @@ export default async function DashboardPage() {
 
             {/* Recent Projects */}
             <section className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-0.5">
                         <h2 className="text-[17px] font-semibold text-neutral-100">
                             Proyectos Recientes
@@ -205,7 +205,7 @@ export default async function DashboardPage() {
                     {projects.map((project, index) => (
                         <div
                             key={project.id}
-                            className={`flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.03] transition-colors ${index !== projects.length - 1 ? "border-b border-white/5" : ""
+                            className={`flex items-start gap-3 px-4 py-4 transition-colors hover:bg-white/[0.03] sm:items-center sm:gap-4 sm:px-5 sm:py-3.5 ${index !== projects.length - 1 ? "border-b border-white/5" : ""
                                 }`}
                         >
                             <GripVertical
@@ -214,7 +214,7 @@ export default async function DashboardPage() {
                                 className="shrink-0 text-neutral-700"
                             />
 
-                            <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
+                            <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                                 <div className="min-w-0">
                                     <Link href={`/proyectos/${project.id}`} className="text-[14px] font-medium text-neutral-200 truncate hover:text-neutral-100 hover:underline transition-colors">
                                         {project.name}
@@ -224,9 +224,9 @@ export default async function DashboardPage() {
                                     </p>
                                 </div>
 
-                                <div className="flex items-center gap-4 shrink-0">
+                                <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4">
                                     <StatusBadge status={project.status} />
-                                    <span className="flex items-center gap-1.5 text-[12px] text-neutral-500 w-28 justify-end">
+                                    <span className="flex items-center gap-1.5 text-[12px] text-neutral-500 sm:w-28 sm:justify-end">
                                         <Clock size={11} strokeWidth={1.5} />
                                         {formatRelativeTime(project.updatedAt)}
                                     </span>

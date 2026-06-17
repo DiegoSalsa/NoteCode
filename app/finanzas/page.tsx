@@ -133,9 +133,9 @@ export default function FinanzasPage() {
 
     if (loading) {
         return (
-            <div className="mx-auto max-w-5xl px-8 py-10">
+            <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
                 <div className="h-8 w-48 rounded bg-neutral-800 animate-pulse mb-6" />
-                <div className="grid grid-cols-3 gap-3 mb-8">
+                <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {[1, 2, 3].map(i => <div key={i} className="h-20 rounded-lg bg-neutral-900 animate-pulse border border-white/10" />)}
                 </div>
             </div>
@@ -143,17 +143,17 @@ export default function FinanzasPage() {
     }
 
     return (
-        <div className="mx-auto max-w-5xl px-8 py-10 space-y-8">
+        <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
             <section className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">Finanzas</h1>
+                        <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Finanzas</h1>
                         <p className="text-[13px] text-neutral-500 mt-1">{invoices.length} facturas registradas</p>
                         {error && <p className="mt-2 text-[13px] text-red-300">{error}</p>}
                     </div>
                     <button
                         onClick={openCreate}
-                        className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white transition-colors"
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
                     >
                         <Plus size={15} strokeWidth={2} />
                         Nueva Factura
@@ -161,7 +161,7 @@ export default function FinanzasPage() {
                 </div>
 
                 {/* KPI Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800">
@@ -218,11 +218,11 @@ export default function FinanzasPage() {
                 {filtered.map((inv, i) => (
                     <div
                         key={inv.id}
-                        className={`flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.03] transition-colors group ${i !== filtered.length - 1 ? "border-b border-white/5" : ""
+                        className={`group flex items-start gap-4 px-4 py-4 transition-colors hover:bg-white/[0.03] sm:items-center sm:px-5 sm:py-3.5 ${i !== filtered.length - 1 ? "border-b border-white/5" : ""
                             }`}
                     >
-                        <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
-                            <div className="min-w-0 flex items-center gap-4">
+                        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                                 <div>
                                     <h3 className="text-[14px] font-medium text-neutral-200">{inv.number}</h3>
                                     <p className="text-[12px] text-neutral-500 mt-0.5">{inv.client}</p>
@@ -231,7 +231,7 @@ export default function FinanzasPage() {
                                     Vence: {new Date(inv.dueDate).toLocaleDateString("es-MX")}
                                 </span>
                             </div>
-                            <div className="flex items-center gap-4 shrink-0">
+                            <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4">
                                 <span className="text-[14px] font-semibold tabular-nums text-neutral-200">
                                     ${inv.amount.toLocaleString()}
                                 </span>
@@ -239,7 +239,7 @@ export default function FinanzasPage() {
                                     Neto: ${Math.round(inv.amount / 1.19).toLocaleString()}
                                 </span>
                                 <StatusBadge status={inv.status} />
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                                     <button onClick={() => openEdit(inv)} className="p-1.5 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5 transition-colors">
                                         <Pencil size={13} strokeWidth={1.5} />
                                     </button>
@@ -259,8 +259,8 @@ export default function FinanzasPage() {
             </div>
 
             {modalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-md rounded-xl border border-white/10 bg-neutral-900 p-6 shadow-2xl">
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                    <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-[17px] font-semibold text-neutral-100">
                                 {editing ? "Editar Factura" : "Nueva Factura"}
@@ -280,7 +280,7 @@ export default function FinanzasPage() {
                                 <input required value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })}
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" placeholder="Nombre del cliente" />
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div>
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Monto ($)</label>
                                     <input required type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
@@ -299,7 +299,7 @@ export default function FinanzasPage() {
                                 <input required type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" />
                             </div>
-                            <div className="flex gap-3 pt-2">
+                            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
                                 <button type="button" onClick={() => setModalOpen(false)}
                                     className="flex-1 rounded-lg border border-white/10 px-4 py-2 text-[13px] font-medium text-neutral-300 hover:bg-white/5 transition-colors">
                                     Cancelar

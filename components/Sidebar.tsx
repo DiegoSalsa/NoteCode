@@ -36,7 +36,8 @@ export default function Sidebar({ me }: { me: Me | null }) {
   }
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col border-r border-white/10 bg-neutral-950">
+    <>
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-60 flex-col border-r border-white/10 bg-neutral-950 md:flex">
       <div className="flex h-14 items-center gap-2.5 border-b border-white/10 px-5">
         <div className="flex h-7 w-7 items-center justify-center rounded bg-neutral-100">
           <span className="text-sm font-extrabold text-neutral-950">P</span>
@@ -102,5 +103,34 @@ export default function Sidebar({ me }: { me: Me | null }) {
         </p>
       </div>
     </aside>
+
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-neutral-950/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur md:hidden">
+      <div className="mx-auto grid max-w-md grid-cols-6 gap-1">
+        {navItems.map((item) => {
+          const active = isActive(item.href);
+          const Icon = item.icon;
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 text-[10px] font-medium transition-colors ${
+                active
+                  ? "bg-neutral-800 text-neutral-100"
+                  : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"
+              }`}
+            >
+              <Icon
+                size={17}
+                strokeWidth={1.5}
+                className={active ? "text-neutral-100" : "text-neutral-500"}
+              />
+              <span className="max-w-full truncate">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+    </>
   );
 }

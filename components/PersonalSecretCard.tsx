@@ -52,9 +52,9 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 py-2">
-            <span className="max-w-44 truncate font-mono text-[13px] text-neutral-200">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-white/10 bg-neutral-950 px-3 py-2 sm:flex-none">
+            <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-neutral-200 sm:max-w-44">
               {value ?? "************"}
             </span>
             <button

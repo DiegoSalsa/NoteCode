@@ -104,8 +104,8 @@ export default function NotasPage() {
 
     if (loading) {
         return (
-            <div className="flex h-[calc(100vh-0px)]">
-                <div className="w-56 border-r border-white/10 bg-neutral-950 p-4 space-y-2">
+            <div className="flex min-h-screen flex-col lg:h-[calc(100vh-0px)] lg:flex-row">
+                <div className="space-y-2 border-b border-white/10 bg-neutral-950 p-4 lg:w-56 lg:border-b-0 lg:border-r">
                     <div className="h-6 w-20 rounded bg-neutral-800 animate-pulse" />
                     {[1, 2, 3, 4].map(i => <div key={i} className="h-6 rounded bg-neutral-800 animate-pulse" />)}
                 </div>
@@ -117,9 +117,9 @@ export default function NotasPage() {
     }
 
     return (
-        <div className="flex h-[calc(100vh-0px)]">
+        <div className="flex min-h-screen flex-col lg:h-[calc(100vh-0px)] lg:flex-row">
             {/* Folder sidebar */}
-            <div className="w-56 shrink-0 border-r border-white/10 bg-neutral-950 flex flex-col">
+            <div className="flex shrink-0 flex-col border-b border-white/10 bg-neutral-950 lg:w-56 lg:border-b-0 lg:border-r">
                 <div className="px-4 py-4 border-b border-white/10">
                     {error && <p className="mb-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</p>}
                     <button
@@ -130,21 +130,21 @@ export default function NotasPage() {
                         Nueva Nota
                     </button>
                 </div>
-                <div className="flex-1 overflow-y-auto py-2 px-2">
+                <div className="overflow-x-auto px-2 py-2 lg:flex-1 lg:overflow-y-auto">
                     <button
                         onClick={() => setSelectedFolder(null)}
-                        className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${selectedFolder === null ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors lg:flex lg:w-full lg:py-1.5 ${selectedFolder === null ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
                             }`}
                     >
                         <FolderKanban size={14} strokeWidth={1.5} />
                         Todas
                     </button>
-                    <div className="mt-2 space-y-0.5">
+                    <div className="mt-2 flex gap-1 lg:block lg:space-y-0.5">
                         {folders.map((f) => (
                             <button
                                 key={f}
                                 onClick={() => setSelectedFolder(f)}
-                                className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${selectedFolder === f ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+                                className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-colors lg:flex lg:w-full lg:py-1.5 ${selectedFolder === f ? "bg-neutral-800 text-neutral-100" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
                                     }`}
                             >
                                 {f}
@@ -158,7 +158,7 @@ export default function NotasPage() {
             </div>
 
             {/* Notes list */}
-            <div className="w-72 shrink-0 border-r border-white/10 bg-neutral-950 flex flex-col">
+            <div className="flex max-h-96 shrink-0 flex-col border-b border-white/10 bg-neutral-950 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
                 <div className="px-3 py-3 border-b border-white/10">
                     <div className="relative">
                         <Search size={14} strokeWidth={1.5} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -200,13 +200,13 @@ export default function NotasPage() {
             </div>
 
             {/* Note viewer */}
-            <div className="flex-1 overflow-y-auto bg-neutral-950">
+            <div className="min-h-[50vh] flex-1 overflow-y-auto bg-neutral-950">
                 {selectedNote ? (
-                    <div className="max-w-3xl mx-auto px-10 py-10">
-                        <div className="flex items-start justify-between mb-6">
+                    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+                        <div className="mb-6 flex items-start justify-between gap-3">
                             <div>
-                                <h1 className="text-[22px] font-bold text-neutral-100">{selectedNote.title}</h1>
-                                <div className="flex items-center gap-3 mt-2">
+                                <h1 className="text-[20px] font-bold text-neutral-100 sm:text-[22px]">{selectedNote.title}</h1>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3">
                                     <span className="text-[12px] text-neutral-500">{selectedNote.folder}</span>
                                     <span className="text-[12px] text-neutral-600">
                                         Actualizado: {new Date(selectedNote.updatedAt).toLocaleString("es-MX")}
@@ -233,7 +233,7 @@ export default function NotasPage() {
                         </pre>
                     </div>
                 ) : (
-                    <div className="flex items-center justify-center h-full">
+                    <div className="flex min-h-[40vh] items-center justify-center px-4 text-center lg:h-full">
                         <p className="text-[14px] text-neutral-500">Selecciona una nota o crea una nueva.</p>
                     </div>
                 )}
@@ -241,8 +241,8 @@ export default function NotasPage() {
 
             {/* Modal */}
             {modalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-lg rounded-xl border border-white/10 bg-neutral-900 p-6 shadow-2xl">
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                    <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-[17px] font-semibold text-neutral-100">
                                 {editing ? "Editar Nota" : "Nueva Nota"}
@@ -285,7 +285,7 @@ export default function NotasPage() {
                                     placeholder="Escribe tu nota aquí..."
                                 />
                             </div>
-                            <div className="flex gap-3 pt-2">
+                            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
                                 <button
                                     type="button"
                                     onClick={() => setModalOpen(false)}

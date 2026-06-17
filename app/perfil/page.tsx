@@ -35,7 +35,7 @@ export default async function ProfilePage() {
     console.error("Failed to load profile", error);
 
     return (
-      <div className="mx-auto max-w-3xl px-8 py-10">
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
         <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-5 py-4">
           <h1 className="text-[17px] font-semibold text-red-200">No se pudo cargar el perfil</h1>
           <p className="mt-2 text-[13px] text-red-200/80">
@@ -47,9 +47,9 @@ export default async function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10 space-y-8">
+    <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
       <section className="space-y-1">
-        <h1 className="text-[28px] font-bold tracking-tight text-neutral-100">Perfil</h1>
+        <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Perfil</h1>
         <p className="text-[14px] text-neutral-400">
           Personaliza tu sesion y guarda claves personales separadas de PuroCode.
         </p>
@@ -94,7 +94,7 @@ export default async function ProfilePage() {
 
             <button
               type="submit"
-              className="rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white"
+              className="w-full rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
             >
               Guardar perfil
             </button>
@@ -142,7 +142,7 @@ export default async function ProfilePage() {
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-end justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-[17px] font-semibold text-neutral-100">Boveda personal</h2>
             <p className="mt-1 text-[13px] text-neutral-500">{profile.personalSecrets.length} claves guardadas</p>
