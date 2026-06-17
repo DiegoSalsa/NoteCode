@@ -1,33 +1,18 @@
 import { createHmac, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
+import { prisma } from "@/lib/prisma";
 
 export const SESSION_COOKIE_NAME = "purocode_session";
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
+const PASSWORD_KEY_LENGTH = 64;
 
-type AuthUser = {
+export type AuthUser = {
   id: string;
   email: string;
   name: string;
-  passwordHash: string;
+  passwordHash: string | null;
 };
-
-export const AUTH_USERS: AuthUser[] = [
-  {
-    id: "diego",
-    email: "diego.guzman@purocode.com",
-    name: "Diego Guzman",
-    passwordHash:
-      "c613631a8a78ea7ca61eb4f322a19d20:087eccdef16d5f3e20ef3600941281548cf951dbbf8b23e3dd7dd5b05f68630fe5f33e66e0f7cd0a41c5cb87e82038be49ae15d95c5f9736d584d6f8d83345b8",
-  },
-  {
-    id: "lucas",
-    email: "lucas.mendez@purocode.com",
-    name: "Lucas Mendez",
-    passwordHash:
-      "33210570b02797f1ecdd0131c80f696d:e261044b58bff1178ab3d975969de22f6cfe2a9e3fcac069a5f591d0148a0e58313bc79d4f8f35550bd2a6d3f4ba71892d07f1db30f326cbc51a95b306379bde",
-  },
-];
 
 function getSessionSecret() {
   const secret = process.env.SESSION_SECRET;
@@ -43,11 +28,20 @@ function sign(value: string) {
   return createHmac("sha256", getSessionSecret()).update(value).digest("hex");
 }
 
-export function verifyPassword(password: string, storedHash: string) {
+export function hashPassword(password: string) {
+  const salt = randomUUID().replace(/-/g, "");
+  const passwordHash = scryptSync(password, salt, PASSWORD_KEY_LENGTH).toString("hex");
+
+  return `${salt}:${passwordHash}`;
+}
+
+export function verifyPassword(password: string, storedHash: string | null | undefined) {
+  if (!storedHash) return false;
+
   const [salt, hash] = storedHash.split(":");
   if (!salt || !hash) return false;
 
-  const passwordHash = scryptSync(password, salt, 64);
+  const passwordHash = scryptSync(password, salt, PASSWORD_KEY_LENGTH);
   const expectedHash = Buffer.from(hash, "hex");
 
   if (passwordHash.byteLength !== expectedHash.byteLength) return false;
@@ -55,8 +49,29 @@ export function verifyPassword(password: string, storedHash: string) {
   return timingSafeEqual(passwordHash, expectedHash);
 }
 
-export function findUserByEmail(email: string) {
-  return AUTH_USERS.find((user) => user.email === email.toLowerCase().trim()) ?? null;
+function normalizeEmail(email: string) {
+  return email.toLowerCase().trim();
+}
+
+export async function findUserByEmail(email: string): Promise<AuthUser | null> {
+  const profile = await prisma.userProfile.findUnique({
+    where: { email: normalizeEmail(email) },
+    select: {
+      userId: true,
+      email: true,
+      displayName: true,
+      passwordHash: true,
+    },
+  });
+
+  if (!profile) return null;
+
+  return {
+    id: profile.userId,
+    email: profile.email,
+    name: profile.displayName,
+    passwordHash: profile.passwordHash,
+  };
 }
 
 export function createSessionToken(userId: string) {
@@ -72,7 +87,7 @@ export function createSessionToken(userId: string) {
   return `${encodedPayload}.${signature}`;
 }
 
-export function verifySessionToken(token: string | undefined) {
+export async function verifySessionToken(token: string | undefined): Promise<AuthUser | null> {
   if (!token) return null;
 
   const [encodedPayload, signature] = token.split(".");
@@ -97,7 +112,24 @@ export function verifySessionToken(token: string | undefined) {
 
     if (!payload.userId || payload.expiresAt < Date.now()) return null;
 
-    return AUTH_USERS.find((user) => user.id === payload.userId) ?? null;
+    const profile = await prisma.userProfile.findUnique({
+      where: { userId: payload.userId },
+      select: {
+        userId: true,
+        email: true,
+        displayName: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!profile) return null;
+
+    return {
+      id: profile.userId,
+      email: profile.email,
+      name: profile.displayName,
+      passwordHash: profile.passwordHash,
+    };
   } catch {
     return null;
   }

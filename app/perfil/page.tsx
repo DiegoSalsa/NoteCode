@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { changePassword } from "@/app/actions/auth";
 import { savePersonalSecret, updateProfile } from "@/app/actions/profile";
 import PersonalSecretCard from "@/components/PersonalSecretCard";
 import { getCurrentUser } from "@/lib/auth";
@@ -149,6 +150,47 @@ export default async function ProfilePage() {
               className="w-full rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white"
             >
               Guardar clave
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <form action={changePassword} className="rounded-lg border border-white/10 bg-neutral-900 p-5 lg:col-start-1">
+          <div className="mb-5">
+            <h2 className="text-[16px] font-semibold text-neutral-100">Cambiar clave</h2>
+            <p className="mt-1 text-[13px] text-neutral-500">Actualiza la clave de acceso a la plataforma.</p>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              name="currentPassword"
+              type="password"
+              required
+              placeholder="Clave actual"
+              className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-white/20"
+            />
+            <input
+              name="password"
+              type="password"
+              minLength={10}
+              required
+              placeholder="Nueva clave"
+              className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-white/20"
+            />
+            <input
+              name="confirmPassword"
+              type="password"
+              minLength={10}
+              required
+              placeholder="Confirmar nueva clave"
+              className="w-full rounded-md border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-white/20"
+            />
+            <button
+              type="submit"
+              className="w-full rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
+            >
+              Actualizar clave
             </button>
           </div>
         </form>

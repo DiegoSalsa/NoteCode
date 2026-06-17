@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/"];
+const PUBLIC_PATHS = ["/", "/establecer-clave"];
 const SESSION_COOKIE_NAME = "purocode_session";
 
 let cachedSecret: string | undefined;
