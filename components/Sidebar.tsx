@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Bot,
   Coins,
   FolderKanban,
   LayoutDashboard,
@@ -16,6 +17,7 @@ import { prefetchJson } from "@/lib/client-cache";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Gilberto", href: "/gilberto", icon: Bot },
   { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init::0:25", api: "/api/projects/init?q=&skip=0&take=25" },
   { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes:::0:30", api: "/api/notes?q=&folder=&skip=0&take=30" },
   { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault::0:50", api: "/api/vault?q=&skip=0&take=50" },
@@ -114,7 +116,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
     </aside>
 
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-neutral-950/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur md:hidden">
-      <div className="mx-auto grid max-w-md grid-cols-6 gap-1">
+      <div className="mx-auto grid max-w-md grid-cols-7 gap-1">
         {navItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;

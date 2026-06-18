@@ -1,0 +1,11 @@
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ ./components/GilbertoChat.tsx
+Error: 
+
+Caused by:
+    0: Failed to read source code from C:\Users\diego\Desktop\NoteCode\components\GilbertoChat.tsx
+    1: El sistema no puede encontrar el archivo especificado. (os error 2)
+
+Import trace for requested module:
+./components/GilbertoChat.tsx

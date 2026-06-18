@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import {
   ArrowRight,
+  Bot,
   Clock,
   Coins,
   FolderKanban,
@@ -237,6 +238,31 @@ export default async function DashboardPage() {
             ? `${profile.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
             : "Tu centro de control personalizado para proyectos, notas y credenciales."}
         </p>
+      </section>
+
+      <section className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-neutral-950">
+              <Bot size={18} strokeWidth={1.5} className="text-neutral-400" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-semibold text-neutral-100">
+                Gilberto
+              </h2>
+              <p className="mt-0.5 text-[13px] text-neutral-500">
+                Asistente ejecutivo para consultar proyectos y finanzas.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/gilberto"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
+          >
+            <span>Hablar con Gilberto</span>
+            <ArrowRight size={14} strokeWidth={1.5} />
+          </Link>
+        </div>
       </section>
 
       <section>
