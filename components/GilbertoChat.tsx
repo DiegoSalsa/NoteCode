@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
+import { usePathname } from "next/navigation";
 import { Bot, Loader2, Mic, MicOff, Play, Send, Volume2, VolumeX } from "lucide-react";
 
 const DEEPGRAM_VOICES = [
@@ -115,6 +116,8 @@ function readVoiceEnabled() {
 }
 
 export default function GilbertoChat({ className = "" }: { className?: string }) {
+    const pathname = usePathname();
+    const pathnameRef = useRef(pathname);
     const [input, setInput] = useState("");
     const [isRecording, setIsRecording] = useState(false);
     const [initialMessages] = useState<UIMessage[]>(() => readSessionMessages() as UIMessage[]);
@@ -134,6 +137,20 @@ export default function GilbertoChat({ className = "" }: { className?: string })
         () =>
             new DefaultChatTransport({
                 api: "/api/gilberto",
+                prepareSendMessagesRequest: ({ messages }) => {
+                    const currentPathname = pathnameRef.current;
+                    const projectMatch = currentPathname.match(/^\/proyectos\/([^/?#]+)/);
+
+                    return {
+                        body: {
+                            messages,
+                            context: {
+                                pathname: currentPathname,
+                                currentProjectId: projectMatch?.[1] ?? null,
+                            },
+                        },
+                    };
+                },
             }),
         [],
     );
@@ -149,6 +166,10 @@ export default function GilbertoChat({ className = "" }: { className?: string })
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [messages, status]);
+
+    useEffect(() => {
+        pathnameRef.current = pathname;
+    }, [pathname]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;

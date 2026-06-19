@@ -21,7 +21,53 @@ function confirmationRequired(action: string, details: Record<string, unknown>) 
     };
 }
 
-export const tools = {
+export type GilbertoToolContext = {
+    pathname?: string;
+    currentProjectId?: string | null;
+};
+
+async function resolveProjectForTool(input: {
+    projectId?: string;
+    projectName?: string;
+    contextProjectId?: string | null;
+}) {
+    if (input.projectId || input.contextProjectId) {
+        const project = await prisma.project.findUnique({
+            where: { id: input.projectId || input.contextProjectId || "" },
+            select: { id: true, name: true, status: true, client: { select: { name: true } } },
+        });
+        if (project) return { project };
+    }
+
+    const projectName = input.projectName?.trim();
+    if (!projectName) {
+        return {
+            error: "Necesito saber a que proyecto te refieres. Puedes abrir el proyecto o decirme el nombre.",
+        };
+    }
+
+    const matches = await prisma.project.findMany({
+        where: {
+            name: { contains: projectName, mode: "insensitive" },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 5,
+        select: { id: true, name: true, status: true, client: { select: { name: true } } },
+    });
+
+    if (matches.length === 1) return { project: matches[0] };
+    if (matches.length > 1) {
+        return {
+            error: "Encontre varios proyectos parecidos. Dime cual usar.",
+            matches,
+        };
+    }
+
+    return { error: "No encontre un proyecto con ese nombre." };
+}
+
+export function createTools(context: GilbertoToolContext = {}) {
+    return {
     getProyectos: tool({
         description:
             "Obtiene proyectos de PuroCode con cliente, estado, monto acordado y fechas relevantes. Puede incluir activos, finalizados o todos.",
@@ -307,6 +353,57 @@ export const tools = {
             }));
         },
     }),
+    buscarNotasProyecto: tool({
+        description:
+            "Busca notas internas de un proyecto especifico. Usa el proyecto actual si el usuario dice este proyecto o esta dentro de /proyectos/[id].",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+            query: z.string().default("").describe("Texto a buscar en titulo o contenido."),
+        }),
+        execute: async ({ projectId, projectName, query }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const q = query.trim();
+            const notes = await prisma.projectNote.findMany({
+                where: {
+                    projectId: resolved.project.id,
+                    ...(q
+                        ? {
+                              OR: [
+                                  { title: { contains: q, mode: "insensitive" } },
+                                  { content: { contains: q, mode: "insensitive" } },
+                              ],
+                          }
+                        : {}),
+                },
+                orderBy: { updatedAt: "desc" },
+                take: 20,
+                select: {
+                    id: true,
+                    title: true,
+                    content: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+
+            return {
+                project: resolved.project,
+                notes: notes.map((note) => ({
+                    ...note,
+                    createdAt: note.createdAt.toISOString(),
+                    updatedAt: note.updatedAt.toISOString(),
+                })),
+            };
+        },
+    }),
     crearNota: tool({
         description:
             "Crea una nota operativa en NoteCode. Sirve para registrar pendientes, ideas, mejoras o recordatorios generales. No guarda contrasenas ni secretos.",
@@ -338,6 +435,63 @@ export const tools = {
                 ...note,
                 createdAt: note.createdAt.toISOString(),
                 updatedAt: note.updatedAt.toISOString(),
+            };
+        },
+    }),
+    crearNotaProyecto: tool({
+        description:
+            "Crea una nota interna dentro de un proyecto especifico. No crea una nota general. Requiere confirmacion explicita.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+            title: z.string().min(1).max(160).describe("Titulo breve de la nota del proyecto."),
+            content: z.string().max(4000).default("").describe("Contenido de la nota del proyecto."),
+            confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
+        }),
+        execute: async ({ projectId, projectName, title, content, confirmado }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            if (!confirmado) {
+                return confirmationRequired("crearNotaProyecto", {
+                    projectId: resolved.project.id,
+                    projectName: resolved.project.name,
+                    clientName: resolved.project.client.name,
+                    title,
+                    content,
+                });
+            }
+
+            const note = await prisma.projectNote.create({
+                data: {
+                    projectId: resolved.project.id,
+                    title,
+                    content,
+                },
+                select: {
+                    id: true,
+                    projectId: true,
+                    title: true,
+                    content: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+
+            invalidateCache(`project:${resolved.project.id}`);
+
+            return {
+                project: resolved.project,
+                note: {
+                    ...note,
+                    createdAt: note.createdAt.toISOString(),
+                    updatedAt: note.updatedAt.toISOString(),
+                },
             };
         },
     }),
@@ -526,4 +680,7 @@ export const tools = {
             };
         },
     }),
-};
+    };
+}
+
+export const tools = createTools();

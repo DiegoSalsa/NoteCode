@@ -5,9 +5,15 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request) {
     try {
-        const { messages } = (await req.json()) as { messages?: UIMessage[] };
+        const { messages, context } = (await req.json()) as {
+            messages?: UIMessage[];
+            context?: {
+                pathname?: string;
+                currentProjectId?: string | null;
+            };
+        };
 
-        return streamGilberto(Array.isArray(messages) ? messages : []);
+        return streamGilberto(Array.isArray(messages) ? messages : [], context);
     } catch (error) {
         const message = error instanceof Error ? error.message : "Error inesperado en Gilberto.";
         console.error("[gilberto]", message);

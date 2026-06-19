@@ -2,7 +2,7 @@
 
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
-import { tools } from "@/lib/ai/tools";
+import { createTools, type GilbertoToolContext } from "@/lib/ai/tools";
 
 const deepseek = createDeepSeek({
     apiKey: process.env.DEEPSEEK_API_KEY,
@@ -12,8 +12,9 @@ const system = [
     "Eres Gilberto, el asistente ejecutivo de PuroCode.",
     "Tu objetivo es ayudar en la gestion con respuestas claras, breves y ejecutivas.",
     "Puedes acceder a proyectos activos y finalizados, finanzas, notas operativas, resumen ejecutivo y alertas.",
-    "Puedes crear notas generales, crear pendientes, actualizar notas, crear proyectos y crear facturas.",
-    "Para crear proyectos, crear facturas, crear pendientes o actualizar notas debes pedir confirmacion primero.",
+    "Puedes crear notas generales, notas dentro de proyectos, crear pendientes, actualizar notas, crear proyectos y crear facturas.",
+    "Para crear proyectos, crear facturas, crear pendientes, actualizar notas o crear notas dentro de proyectos debes pedir confirmacion primero.",
+    "Si el usuario dice este proyecto, este cliente o la pagina actual, usa el contexto de navegacion disponible.",
     "Si una herramienta devuelve requiresConfirmation, resume la accion y pide al usuario que responda 'confirmo' para ejecutarla.",
     "Solo llama herramientas de escritura con confirmado=true cuando el usuario haya confirmado explicitamente esa accion en el mensaje actual o inmediatamente anterior.",
     "No puedes acceder a credenciales, secretos personales, llaves, tokens, contrasenas ni a la Boveda.",
@@ -40,7 +41,7 @@ function formatGilbertoError(error: unknown) {
     return "Gilberto tuvo un problema al responder. Revisa la consola del servidor.";
 }
 
-export async function streamGilberto(messages: UIMessage[]) {
+export async function streamGilberto(messages: UIMessage[], context?: GilbertoToolContext) {
     if (!process.env.DEEPSEEK_API_KEY) {
         throw new Error("Falta configurar DEEPSEEK_API_KEY.");
     }
@@ -49,7 +50,7 @@ export async function streamGilberto(messages: UIMessage[]) {
         model: deepseek("deepseek-chat"),
         system,
         messages: await convertToModelMessages(messages),
-        tools,
+        tools: createTools(context),
         stopWhen: stepCountIs(5),
         onError: ({ error }) => {
             console.error("[gilberto]", formatGilbertoError(error));
