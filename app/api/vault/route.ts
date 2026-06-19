@@ -60,8 +60,8 @@ export async function GET(request: NextRequest) {
         credentials: credentials.map((credential) => ({
           ...credential,
           title: credential.name,
-          service: credential.project.name,
-          clientName: credential.project.client.name,
+          service: credential.project?.name ?? "General empresa",
+          clientName: credential.project?.client.name ?? "Empresa",
           url: null,
           notes: null,
           password: MASKED_SECRET,

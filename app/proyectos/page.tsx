@@ -73,12 +73,14 @@ export default function ProyectosPage() {
     const [editing, setEditing] = useState<Project | null>(null);
     const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
     const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
 
     const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
         const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "25" });
         const key = `projects:init:${debouncedSearch}:${skip}:25`;
         const data = await fetchAndCacheJson<Partial<ProjectsPayload>>(key, `/api/projects/init?${params.toString()}`);
         const items = Array.isArray(data.projects) ? data.projects : [];
+        setError("");
         setProjects((current) => append ? [...current, ...items] : items);
         setClients(Array.isArray(data.clients) ? data.clients : []);
         setNextSkip(data.nextSkip ?? skip + items.length);
@@ -138,7 +140,13 @@ export default function ProyectosPage() {
 
     async function handleDelete(id: string) {
         if (!confirm("¿Eliminar este proyecto?")) return;
-        await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        setError("");
+        const response = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        if (!response.ok) {
+            const data = await response.json().catch(() => null);
+            setError(data?.error || "No se pudo eliminar el proyecto.");
+            return;
+        }
         await fetchData();
     }
 
@@ -165,7 +173,7 @@ export default function ProyectosPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Proyectos</h1>
-                        <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos activos</p>
+                        <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos</p>
                     </div>
                     <button
                         onClick={openCreate}
@@ -175,6 +183,12 @@ export default function ProyectosPage() {
                         Nuevo Proyecto
                     </button>
                 </div>
+
+                {error && (
+                    <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+                        {error}
+                    </div>
+                )}
 
                 {/* Search */}
                 <div className="relative">

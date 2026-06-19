@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
                 : {}),
         };
         const notes = await cached(`notes:${q}:${folder}:${skip}:${take}`, 30_000, async () => {
-            const [items, total] = await Promise.all([
+            const [items, total, folderRows] = await Promise.all([
                 prisma.note.findMany({
                     where,
                     orderBy: { updatedAt: "desc" },
@@ -40,10 +40,16 @@ export async function GET(request: NextRequest) {
                     },
                 }),
                 prisma.note.count({ where }),
+                prisma.note.findMany({
+                    distinct: ["folder"],
+                    orderBy: { folder: "asc" },
+                    select: { folder: true },
+                }),
             ]);
 
             return {
                 items,
+                folders: folderRows.map((row) => row.folder).filter(Boolean),
                 nextSkip: skip + items.length,
                 hasMore: skip + items.length < total,
                 total,

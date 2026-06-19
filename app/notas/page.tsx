@@ -18,6 +18,7 @@ const FOLDERS = ["General", "Procesos", "Tech", "Reuniones", "Ideas"];
 
 type NotesPayload = {
     items: Note[];
+    folders: string[];
     nextSkip: number;
     hasMore: boolean;
     total: number;
@@ -30,6 +31,7 @@ function asArray<T>(value: unknown): T[] {
 export default function NotasPage() {
     const cached = readCachedJson<NotesPayload>("notes:::0:30");
     const [notes, setNotes] = useState<Note[]>(() => asArray<Note>(cached?.items));
+    const [availableFolders, setAvailableFolders] = useState<string[]>(() => asArray<string>(cached?.folders));
     const [loading, setLoading] = useState(!cached);
     const [loadingMore, setLoadingMore] = useState(false);
     const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? notes.length);
@@ -59,6 +61,7 @@ export default function NotasPage() {
             const items = asArray<Note>(data.items);
             setError(null);
             setNotes((current) => append ? [...current, ...items] : items);
+            setAvailableFolders(asArray<string>(data.folders));
             setNextSkip(data.nextSkip ?? skip + items.length);
             setHasMore(Boolean(data.hasMore));
             setTotal(data.total ?? items.length);
@@ -125,7 +128,7 @@ export default function NotasPage() {
         await fetchNotes();
     }
 
-    const folders = [...new Set([...FOLDERS, ...notes.map(n => n.folder)])];
+    const folders = [...new Set([...FOLDERS, ...availableFolders, ...notes.map(n => n.folder)])];
     const filtered = notes;
 
     const selectedNote = selectedNoteId ? notes.find(n => n.id === selectedNoteId) : null;

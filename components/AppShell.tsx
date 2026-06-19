@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import FloatingGilberto from "@/components/FloatingGilberto";
 
 type ShellUser = {
   displayName: string;
@@ -26,6 +27,7 @@ export default function AppShell({
     <>
       <Sidebar me={user} />
       <main className="min-h-screen pb-20 md:ml-60 md:pb-0">{children}</main>
+      <FloatingGilberto />
     </>
   );
 }

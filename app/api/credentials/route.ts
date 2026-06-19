@@ -29,8 +29,8 @@ export async function GET() {
       credentials.map((credential) => ({
         ...credential,
         title: credential.name,
-        service: credential.project.name,
-        clientName: credential.project.client.name,
+        service: credential.project?.name ?? "General empresa",
+        clientName: credential.project?.client.name ?? "Empresa",
         url: null,
         notes: null,
         password: MASKED_SECRET,
@@ -45,16 +45,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    if (!body.projectId || !body.username || !body.password || !(body.name || body.title)) {
+    if (!body.username || !body.password || !(body.name || body.title)) {
       return NextResponse.json(
-        { error: "projectId, name, username and password are required" },
+        { error: "name, username and password are required" },
         { status: 400 },
       );
     }
 
     const credential = await prisma.credential.create({
       data: {
-        projectId: body.projectId,
+        projectId: body.projectId || null,
         name: body.name || body.title,
         username: body.username,
         secretData: encryptString(body.password),
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
         updatedAt: true,
       },
     });
-    invalidateCache(`project:${credential.projectId}`);
+    if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
 

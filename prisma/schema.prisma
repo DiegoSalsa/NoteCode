@@ -127,8 +127,8 @@ model ProjectNote {
 
 model Credential {
   id         String     @id @default(uuid())
-  projectId  String     @map("project_id")
-  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String?    @map("project_id")
+  project    Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name       String
   username   String
   secretData String     @map("secret_data")
@@ -139,6 +139,22 @@ model Credential {
   @@index([projectId])
   @@index([updatedAt])
   @@map("credentials")
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  name      String
+  category  String   @default("General")
+  mimeType  String   @map("mime_type")
+  size      Int
+  fileData  Bytes    @map("file_data")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([category])
+  @@index([updatedAt])
+  @@index([name])
+  @@map("documents")
 }
 
 model AuditLog {

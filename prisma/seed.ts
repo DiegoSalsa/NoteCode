@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   await prisma.note.deleteMany();
+  await prisma.document.deleteMany();
   await prisma.invoice.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.credential.deleteMany();

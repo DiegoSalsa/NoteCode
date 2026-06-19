@@ -34,7 +34,7 @@ export async function PATCH(
         updatedAt: true,
       },
     });
-    invalidateCache(`project:${credential.projectId}`);
+    if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
 
@@ -54,7 +54,7 @@ export async function DELETE(
       where: { id },
       select: { projectId: true },
     });
-    invalidateCache(`project:${credential.projectId}`);
+    if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
     return NextResponse.json({ success: true });

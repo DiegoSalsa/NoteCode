@@ -8,38 +8,13 @@
    - Environments: .env
 
  ✓ Starting...
- ✓ Ready in 1623ms
- ✓ Compiled /middleware in 146ms (115 modules)
-   Reload env: .env
- ✓ Compiled in 68ms (115 modules)
-   Reload env: .env
- ✓ Compiled in 52ms (115 modules)
- ○ Compiling /gilberto ...
- ✓ Compiled /gilberto in 1328ms (1097 modules)
- GET /gilberto 200 in 1666ms
- GET /gilberto 200 in 3783ms
- ✓ Compiled in 428ms (420 modules)
- ✓ Compiled in 189ms (420 modules)
- ✓ Compiled in 141ms (420 modules)
- ✓ Compiled in 203ms (420 modules)
- ✓ Compiled in 158ms (420 modules)
- ✓ Compiled in 446ms (421 modules)
- ✓ Compiled in 235ms (421 modules)
- ✓ Compiled in 251ms (421 modules)
- ✓ Compiled in 153ms (421 modules)
- ✓ Compiled in 267ms (421 modules)
- ✓ Compiled in 233ms (421 modules)
- ✓ Compiled in 207ms (421 modules)
- ✓ Compiled in 146ms (421 modules)
- ✓ Compiled in 139ms (421 modules)
- ✓ Compiled in 123ms (421 modules)
- ✓ Compiled in 147ms (421 modules)
- ✓ Compiled in 178ms (421 modules)
- ✓ Compiled in 163ms (421 modules)
- ✓ Compiled in 208ms (421 modules)
- ✓ Compiled in 218ms (421 modules)
- ✓ Compiled in 123ms (421 modules)
-   Reload env: .env
- ✓ Compiled in 430ms (536 modules)
- ✓ Compiled in 81ms (522 modules)
- ✓ Compiled in 260ms (421 modules)
+ ✓ Ready in 1985ms
+ ✓ Compiled /middleware in 186ms (115 modules)
+ ○ Compiling / ...
+ ✓ Compiled / in 1563ms (1108 modules)
+ GET / 200 in 2132ms
+ ✓ Compiled in 188ms (430 modules)
+ ✓ Compiled in 122ms (430 modules)
+ ✓ Compiled in 146ms (430 modules)
+ ✓ Compiled in 104ms (430 modules)
+ ✓ Compiled in 132ms (430 modules)

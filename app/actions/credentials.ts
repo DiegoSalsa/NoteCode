@@ -6,20 +6,20 @@ import { decryptString, encryptString } from "@/lib/crypto";
 const MOCK_USER_ID = "internal-user";
 
 type SaveCredentialInput = {
-  projectId: string;
+  projectId?: string;
   name: string;
   username: string;
   password: string;
 };
 
 export async function saveCredential(data: SaveCredentialInput) {
-  if (!data.projectId || !data.name || !data.username || !data.password) {
-    throw new Error("projectId, name, username and password are required.");
+  if (!data.name || !data.username || !data.password) {
+    throw new Error("name, username and password are required.");
   }
 
   const credential = await prisma.credential.create({
     data: {
-      projectId: data.projectId,
+      projectId: data.projectId || null,
       name: data.name,
       username: data.username,
       secretData: encryptString(data.password),

@@ -24,15 +24,20 @@ function confirmationRequired(action: string, details: Record<string, unknown>) 
 export const tools = {
     getProyectos: tool({
         description:
-            "Obtiene los proyectos activos de PuroCode con cliente, estado, monto acordado y fechas relevantes.",
-        inputSchema: z.object({}),
-        execute: async () => {
+            "Obtiene proyectos de PuroCode con cliente, estado, monto acordado y fechas relevantes. Puede incluir activos, finalizados o todos.",
+        inputSchema: z.object({
+            estado: z.enum(["todos", "activos", "finalizados"]).default("todos").describe("Filtro de proyectos a consultar."),
+        }),
+        execute: async ({ estado }) => {
+            const where =
+                estado === "activos"
+                    ? { status: { not: "Completado" } }
+                    : estado === "finalizados"
+                      ? { status: "Completado" }
+                      : {};
+
             const projects = await prisma.project.findMany({
-                where: {
-                    status: {
-                        not: "Completado",
-                    },
-                },
+                where,
                 select: {
                     id: true,
                     name: true,

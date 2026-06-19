@@ -8,7 +8,7 @@ import { useDebounce } from "@/lib/use-debounce";
 
 type Credential = {
   id: string;
-  projectId: string;
+  projectId: string | null;
   name: string;
   title: string;
   service: string;
@@ -51,7 +51,7 @@ export default function BovedaPage() {
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ projectId: "", name: "", username: "", password: "" });
+  const [form, setForm] = useState({ projectId: "", scope: "company", name: "", username: "", password: "" });
 
   const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
     const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "50" });
@@ -65,10 +65,7 @@ export default function BovedaPage() {
     setNextSkip(data.nextSkip ?? skip + credentialItems.length);
     setHasMore(Boolean(data.hasMore));
     setTotal(data.total ?? credentialItems.length);
-    setForm((current) => ({
-      ...current,
-      projectId: current.projectId || projectItems[0]?.id || "",
-    }));
+    setForm((current) => ({ ...current }));
     setLoading(false);
     setLoadingMore(false);
   }, [debouncedSearch]);
@@ -91,10 +88,15 @@ export default function BovedaPage() {
       await fetch("/api/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          projectId: form.scope === "project" ? form.projectId : "",
+          name: form.name,
+          username: form.username,
+          password: form.password,
+        }),
       });
       setModalOpen(false);
-      setForm({ projectId: projects[0]?.id || "", name: "", username: "", password: "" });
+      setForm({ projectId: "", scope: "company", name: "", username: "", password: "" });
       await fetchData();
     } finally {
       setSaving(false);
@@ -148,7 +150,7 @@ export default function BovedaPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Boveda</h1>
-            <p className="mt-1 text-[13px] text-neutral-500">{total} credenciales de proyectos</p>
+            <p className="mt-1 text-[13px] text-neutral-500">{total} credenciales de proyectos y empresa</p>
           </div>
           <button
             onClick={() => setModalOpen(true)}
@@ -229,6 +231,33 @@ export default function BovedaPage() {
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-neutral-300">Alcance</label>
+                <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-neutral-950 p-1">
+                  {[
+                    { value: "company", label: "Empresa" },
+                    { value: "project", label: "Proyecto" },
+                  ].map((scope) => (
+                    <button
+                      key={scope.value}
+                      type="button"
+                      onClick={() =>
+                        setForm({
+                          ...form,
+                          scope: scope.value,
+                          projectId: scope.value === "project" ? form.projectId || projects[0]?.id || "" : "",
+                        })
+                      }
+                      className={`rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
+                        form.scope === scope.value ? "bg-neutral-100 text-neutral-950" : "text-neutral-400 hover:bg-white/5 hover:text-neutral-200"
+                      }`}
+                    >
+                      {scope.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {form.scope === "project" && (
+              <div>
                 <label className="mb-1.5 block text-[13px] font-medium text-neutral-300">Proyecto</label>
                 <select
                   required
@@ -244,6 +273,7 @@ export default function BovedaPage() {
                   ))}
                 </select>
               </div>
+              )}
               <input
                 required
                 value={form.name}

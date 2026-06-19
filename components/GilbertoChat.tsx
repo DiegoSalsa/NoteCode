@@ -19,6 +19,9 @@ const DEEPGRAM_VOICES = [
     { id: "aura-2-valerio-es", label: "Valerio - grave natural" },
 ];
 
+const CHAT_SESSION_KEY = "gilberto.sessionMessages";
+const VOICE_ENABLED_KEY = "gilberto.voiceEnabled";
+
 function getMessageText(message: UIMessage) {
     return message.parts
         .filter((part) => part.type === "text")
@@ -94,10 +97,28 @@ function getSupportedMimeType() {
     return options.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-export default function GilbertoChat() {
+function readSessionMessages() {
+    if (typeof window === "undefined") return [];
+
+    try {
+        const raw = window.sessionStorage.getItem(CHAT_SESSION_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function readVoiceEnabled() {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(VOICE_ENABLED_KEY) === "true";
+}
+
+export default function GilbertoChat({ className = "" }: { className?: string }) {
     const [input, setInput] = useState("");
     const [isRecording, setIsRecording] = useState(false);
-    const [voiceEnabled, setVoiceEnabled] = useState(true);
+    const [initialMessages] = useState<UIMessage[]>(() => readSessionMessages() as UIMessage[]);
+    const [voiceEnabled, setVoiceEnabled] = useState(() => readVoiceEnabled());
     const [selectedVoice, setSelectedVoice] = useState(DEEPGRAM_VOICES[0].id);
     const [voiceStatus, setVoiceStatus] = useState("");
     const [voiceError, setVoiceError] = useState("");
@@ -119,6 +140,7 @@ export default function GilbertoChat() {
 
     const { messages, sendMessage, status, stop, error } = useChat({
         transport,
+        messages: initialMessages,
     });
 
     const isBusy = status === "submitted" || status === "streaming";
@@ -134,9 +156,23 @@ export default function GilbertoChat() {
     }, []);
 
     useEffect(() => {
+        if (typeof window === "undefined") return;
+        window.sessionStorage.setItem(CHAT_SESSION_KEY, JSON.stringify(messages));
+    }, [messages]);
+
+    useEffect(() => {
         if (typeof window === "undefined" || !selectedVoice) return;
         window.localStorage.setItem("gilberto.deepgramVoice", selectedVoice);
     }, [selectedVoice]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        window.localStorage.setItem(VOICE_ENABLED_KEY, String(voiceEnabled));
+        if (!voiceEnabled) {
+            audioPlayerRef.current?.pause();
+            setVoiceStatus("");
+        }
+    }, [voiceEnabled]);
 
     useEffect(() => {
         if (!voiceEnabled || typeof window === "undefined") return;
@@ -161,6 +197,8 @@ export default function GilbertoChat() {
     }, []);
 
     async function playDeepgramVoice(text: string) {
+        if (!voiceEnabled) return;
+
         try {
             setVoiceError("");
             audioPlayerRef.current?.pause();
@@ -284,6 +322,7 @@ export default function GilbertoChat() {
     }
 
     function testVoice() {
+        if (!voiceEnabled) return;
         void playDeepgramVoice("Hola, soy Gilberto. Ahora uso una voz de Deepgram en espanol y puedo escucharte desde el celular.");
     }
 
@@ -297,7 +336,7 @@ export default function GilbertoChat() {
     }
 
     return (
-        <section className="mx-auto flex h-[min(720px,calc(100vh-2rem))] w-full max-w-3xl flex-col rounded-lg border border-white/10 bg-neutral-950 shadow-2xl">
+        <section className={`mx-auto flex h-[min(720px,calc(100vh-2rem))] w-full max-w-3xl flex-col rounded-lg border border-white/10 bg-neutral-950 shadow-2xl ${className}`}>
             <header className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/10 bg-neutral-900">
@@ -312,7 +351,8 @@ export default function GilbertoChat() {
                     <select
                         value={selectedVoice}
                         onChange={(event) => setSelectedVoice(event.target.value)}
-                        className="max-w-56 rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-[12px] text-neutral-300 outline-none transition-colors hover:bg-white/5 focus:border-white/20"
+                        disabled={!voiceEnabled}
+                        className="max-w-56 rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-[12px] text-neutral-300 outline-none transition-colors hover:bg-white/5 focus:border-white/20 disabled:opacity-50"
                         title="Voz Deepgram de Gilberto"
                     >
                         {DEEPGRAM_VOICES.map((voice) => (
@@ -324,7 +364,8 @@ export default function GilbertoChat() {
                     <button
                         type="button"
                         onClick={testVoice}
-                        className="rounded-md p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100"
+                        disabled={!voiceEnabled}
+                        className="rounded-md p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100 disabled:opacity-40"
                         title="Probar voz"
                     >
                         <Play size={16} />
@@ -333,7 +374,7 @@ export default function GilbertoChat() {
                         type="button"
                         onClick={() => setVoiceEnabled((current) => !current)}
                         className="rounded-md p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100"
-                        title={voiceEnabled ? "Silenciar voz" : "Activar voz"}
+                        title={voiceEnabled ? "Apagar voz" : "Encender voz"}
                     >
                         {voiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
                     </button>
