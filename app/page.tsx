@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { LockKeyhole, LogIn, Mail } from "lucide-react";
+import { LogIn, Mail } from "lucide-react";
 import { login, type LoginState } from "@/app/actions/auth";
 
 const initialState: LoginState = { step: "email" };
@@ -14,13 +14,12 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-neutral-950 px-6 py-10 text-neutral-100">
       <section className="w-full max-w-sm space-y-6">
         <div className="space-y-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-neutral-900">
-            <LockKeyhole size={18} strokeWidth={1.5} className="text-neutral-300" />
-          </div>
+          <img
+            src="/brand/notecode-logo-stacked-white.svg"
+            alt="NoteCode"
+            className="h-20 w-auto"
+          />
           <div>
-            <h1 className="text-[24px] font-semibold tracking-tight text-neutral-100">
-              NoteCode
-            </h1>
             <p className="mt-1 text-[14px] leading-relaxed text-neutral-400">
               Ingresa con tu correo interno. Si es tu primer acceso, te enviaremos un enlace seguro.
             </p>

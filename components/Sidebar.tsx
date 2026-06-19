@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import {
   Bot,
   Coins,
@@ -9,6 +10,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   LogOut,
+  MoreHorizontal,
   NotebookPen,
   ShieldCheck,
   User,
@@ -27,6 +29,9 @@ const navItems = [
   { label: "Perfil", href: "/perfil", icon: User },
 ];
 
+const mobilePrimaryItems = navItems.slice(0, 4);
+const mobileMoreItems = navItems.slice(4);
+
 type Me = {
   displayName: string;
   email: string;
@@ -34,6 +39,7 @@ type Me = {
 
 export default function Sidebar({ me }: { me: Me | null }) {
   const pathname = usePathname();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -50,12 +56,11 @@ export default function Sidebar({ me }: { me: Me | null }) {
     <>
     <aside className="fixed left-0 top-0 z-40 hidden h-screen w-60 flex-col border-r border-white/10 bg-neutral-950 md:flex">
       <div className="flex h-14 items-center gap-2.5 border-b border-white/10 px-5">
-        <div className="flex h-7 w-7 items-center justify-center rounded bg-neutral-100">
-          <span className="text-sm font-extrabold text-neutral-950">N</span>
-        </div>
-        <span className="text-[15px] font-semibold tracking-tight text-neutral-100">
-          NoteCode
-        </span>
+        <img
+          src="/brand/notecode-logo-horizontal-white.svg"
+          alt="NoteCode"
+          className="h-7 w-auto max-w-[150px]"
+        />
       </div>
 
       <nav className="flex flex-col gap-0.5 px-3 py-4">
@@ -117,9 +122,46 @@ export default function Sidebar({ me }: { me: Me | null }) {
       </div>
     </aside>
 
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-neutral-950/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur md:hidden">
-      <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
-        {navItems.map((item) => {
+    {moreOpen && (
+      <button
+        type="button"
+        aria-label="Cerrar menu"
+        onClick={() => setMoreOpen(false)}
+        className="fixed inset-0 z-40 bg-black/20 md:hidden"
+      />
+    )}
+
+    {moreOpen && (
+      <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-50 overflow-hidden rounded-lg border border-white/10 bg-neutral-950 shadow-2xl md:hidden">
+        <div className="grid grid-cols-2 gap-1 p-2">
+          {mobileMoreItems.map((item) => {
+            const active = isActive(item.href);
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMoreOpen(false)}
+                onTouchStart={() => prefetchItem(item)}
+                className={`flex items-center gap-2.5 rounded-md px-3 py-3 text-[12px] font-medium transition-colors ${
+                  active
+                    ? "bg-neutral-800 text-neutral-100"
+                    : "text-neutral-400 hover:bg-white/5 hover:text-neutral-200"
+                }`}
+              >
+                <Icon size={16} strokeWidth={1.5} className={active ? "text-neutral-100" : "text-neutral-500"} />
+                <span className="min-w-0 truncate">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    )}
+
+    <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-neutral-950/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)] pt-1.5 backdrop-blur md:hidden">
+      <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+        {mobilePrimaryItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
 
@@ -127,8 +169,9 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMoreOpen(false)}
               onTouchStart={() => prefetchItem(item)}
-              className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 text-[10px] font-medium transition-colors ${
+              className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-medium transition-colors ${
                 active
                   ? "bg-neutral-800 text-neutral-100"
                   : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"
@@ -143,6 +186,22 @@ export default function Sidebar({ me }: { me: Me | null }) {
             </Link>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((current) => !current)}
+          className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-medium transition-colors ${
+            moreOpen || mobileMoreItems.some((item) => isActive(item.href))
+              ? "bg-neutral-800 text-neutral-100"
+              : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"
+          }`}
+        >
+          <MoreHorizontal
+            size={17}
+            strokeWidth={1.5}
+            className={moreOpen || mobileMoreItems.some((item) => isActive(item.href)) ? "text-neutral-100" : "text-neutral-500"}
+          />
+          <span>Mas</span>
+        </button>
       </div>
     </nav>
     </>
