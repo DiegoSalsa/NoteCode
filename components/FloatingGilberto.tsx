@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Bot, X } from "lucide-react";
 import GilbertoChat from "@/components/GilbertoChat";
@@ -9,11 +9,7 @@ export default function FloatingGilberto() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (pathname.startsWith("/gilberto")) {
-      setOpen(true);
-    }
-  }, [pathname]);
+  if (pathname.startsWith("/gilberto")) return null;
 
   return (
     <div className="fixed bottom-5 right-5 z-50 hidden md:block">
