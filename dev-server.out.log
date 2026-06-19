@@ -65,3 +65,32 @@
  ✓ Compiled in 92ms (429 modules)
  ✓ Compiled in 104ms (429 modules)
  ✓ Compiled in 394ms (430 modules)
+ ✓ Compiled in 156ms (430 modules)
+ ✓ Compiled in 96ms (430 modules)
+ ✓ Compiled in 103ms (430 modules)
+ ✓ Compiled in 97ms (430 modules)
+ ✓ Compiled in 202ms (545 modules)
+ ✓ Compiled in 106ms (430 modules)
+ ○ Compiling / ...
+ ✓ Compiled / in 652ms (1116 modules)
+ GET /manifest.webmanifest 200 in 793ms
+ GET / 200 in 962ms
+ GET /manifest.webmanifest 200 in 17ms
+ GET /manifest.webmanifest 200 in 11ms
+ ✓ Compiled in 118ms (431 modules)
+ ✓ Compiled in 554ms (1133 modules)
+ ✓ Compiled in 205ms (547 modules)
+ GET /manifest.webmanifest 200 in 79ms
+ GET /manifest.webmanifest 200 in 31ms
+ GET / 200 in 112ms
+ GET / 200 in 17ms
+ ✓ Compiled in 262ms (1133 modules)
+ GET /manifest.webmanifest 200 in 39ms
+ GET / 200 in 93ms
+ GET / 200 in 19ms
+ ✓ Compiled in 345ms (1133 modules)
+ GET / 200 in 31ms
+ GET /manifest.webmanifest 200 in 10ms
+ GET /manifest.webmanifest 200 in 9ms
+ GET / 200 in 17ms
+ GET /manifest.webmanifest 200 in 11ms

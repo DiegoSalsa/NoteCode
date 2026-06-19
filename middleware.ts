@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/", "/establecer-clave"];
+const PUBLIC_PATHS = ["/", "/establecer-clave", "/manifest.webmanifest", "/sw.js"];
 const SESSION_COOKIE_NAME = "notecode_session";
 
 let cachedSecret: string | undefined;
@@ -81,6 +81,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|js)$).*)",
   ],
 };

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
         name: "NoteCode",
         short_name: "NoteCode",
         description: "Sistema operativo interno para gestion de proyectos, notas y credenciales.",
-        start_url: "/dashboard",
+        start_url: "/",
         scope: "/",
         display: "standalone",
         background_color: "#0a0a0a",
