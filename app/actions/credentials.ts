@@ -1,9 +1,9 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
-
-const MOCK_USER_ID = "internal-user";
+import { getCurrentUser, RECENT_WEBAUTHN_COOKIE, verifyRecentWebAuthnToken } from "@/lib/auth";
 
 type SaveCredentialInput = {
   projectId?: string;
@@ -38,6 +38,13 @@ export async function saveCredential(data: SaveCredentialInput) {
 }
 
 export async function revealCredential(credentialId: string) {
+  const user = await getCurrentUser();
+  const cookieStore = await cookies();
+
+  if (!user || !verifyRecentWebAuthnToken(cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value, user.id)) {
+    throw new Error("Necesitas verificar tu huella para revelar secretos.");
+  }
+
   if (!credentialId) {
     throw new Error("credentialId is required.");
   }
@@ -55,7 +62,7 @@ export async function revealCredential(credentialId: string) {
 
   await prisma.auditLog.create({
     data: {
-      userId: MOCK_USER_ID,
+      userId: user.id,
       action: "CREDENTIAL_REVEALED",
       credentialId: credential.id,
     },

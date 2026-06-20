@@ -1,7 +1,7 @@
 type SendEmailInput = {
   to: string;
   subject: string;
-  html: string;
+  html?: string;
   text: string;
 };
 
@@ -26,12 +26,27 @@ export async function sendEmail({ to, subject, html, text }: SendEmailInput) {
       from: getFromEmail(),
       to,
       subject,
-      html,
+      html: html ?? textToHtml(text),
       text,
     }),
   });
 
   if (!response.ok) {
-    throw new Error("Resend failed to send the email.");
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`Resend failed to send the email.${errorText ? ` ${errorText}` : ""}`);
   }
+
+  return (await response.json().catch(() => null)) as { id?: string } | null;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function textToHtml(text: string) {
+  return `<div style="font-family:Inter,Arial,sans-serif;line-height:1.55;color:#171717;white-space:pre-wrap">${escapeHtml(text)}</div>`;
 }

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { sendEmail } from "@/lib/email";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { invalidateCache } from "@/lib/server-cache";
 
@@ -19,6 +20,10 @@ function confirmationRequired(action: string, details: Record<string, unknown>) 
         details,
         message: "Necesito confirmacion antes de ejecutar esta accion. Responde con 'confirmo' si esta correcto.",
     };
+}
+
+function isValidEmail(value: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 export type GilbertoToolContext = {
@@ -401,6 +406,285 @@ export function createTools(context: GilbertoToolContext = {}) {
                     createdAt: note.createdAt.toISOString(),
                     updatedAt: note.updatedAt.toISOString(),
                 })),
+            };
+        },
+    }),
+    getDetalleProyecto: tool({
+        description:
+            "Obtiene un resumen completo de un proyecto: cliente, estado, monto, requisitos, notas recientes, tecnologias, factura y actividad. No devuelve credenciales ni secretos.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+        }),
+        execute: async ({ projectId, projectName }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const project = await prisma.project.findUnique({
+                where: { id: resolved.project.id },
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    status: true,
+                    agreedAmount: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    client: { select: { name: true, email: true, company: true } },
+                    requirements: {
+                        orderBy: [{ completed: "asc" }, { priority: "desc" }],
+                        take: 20,
+                        select: { id: true, description: true, category: true, priority: true, completed: true },
+                    },
+                    techs: {
+                        orderBy: { category: "asc" },
+                        select: { name: true, category: true },
+                    },
+                    notes: {
+                        orderBy: { updatedAt: "desc" },
+                        take: 8,
+                        select: { id: true, title: true, content: true, updatedAt: true },
+                    },
+                    invoice: {
+                        select: { number: true, amount: true, status: true, dueDate: true, paidAt: true },
+                    },
+                    statusLogs: {
+                        orderBy: { createdAt: "desc" },
+                        take: 8,
+                        select: { status: true, note: true, createdAt: true },
+                    },
+                },
+            });
+
+            if (!project) return { error: "No encontre el proyecto." };
+
+            return {
+                ...project,
+                agreedAmountClp: formatClp(project.agreedAmount),
+                createdAt: project.createdAt.toISOString(),
+                updatedAt: project.updatedAt.toISOString(),
+                notes: project.notes.map((note) => ({ ...note, updatedAt: note.updatedAt.toISOString() })),
+                invoice: project.invoice
+                    ? {
+                          ...project.invoice,
+                          amountClp: formatClp(project.invoice.amount),
+                          dueDate: project.invoice.dueDate.toISOString(),
+                          paidAt: project.invoice.paidAt?.toISOString() ?? null,
+                      }
+                    : null,
+                statusLogs: project.statusLogs.map((log) => ({ ...log, createdAt: log.createdAt.toISOString() })),
+            };
+        },
+    }),
+    detectarPendientesProyecto: tool({
+        description:
+            "Detecta pendientes accionables de un proyecto usando requisitos incompletos, notas recientes y estado de factura. No lee credenciales ni secretos.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+        }),
+        execute: async ({ projectId, projectName }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const today = new Date();
+            const project = await prisma.project.findUnique({
+                where: { id: resolved.project.id },
+                select: {
+                    id: true,
+                    name: true,
+                    status: true,
+                    updatedAt: true,
+                    client: { select: { name: true } },
+                    requirements: {
+                        where: { completed: false },
+                        orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+                        take: 15,
+                        select: { description: true, category: true, priority: true },
+                    },
+                    notes: {
+                        where: {
+                            OR: [
+                                { title: { contains: "pendiente", mode: "insensitive" } },
+                                { content: { contains: "pendiente", mode: "insensitive" } },
+                                { content: { contains: "revisar", mode: "insensitive" } },
+                                { content: { contains: "hacer", mode: "insensitive" } },
+                                { content: { contains: "enviar", mode: "insensitive" } },
+                            ],
+                        },
+                        orderBy: { updatedAt: "desc" },
+                        take: 10,
+                        select: { title: true, content: true, updatedAt: true },
+                    },
+                    invoice: {
+                        select: { number: true, amount: true, status: true, dueDate: true },
+                    },
+                },
+            });
+
+            if (!project) return { error: "No encontre el proyecto." };
+
+            return {
+                project: {
+                    id: project.id,
+                    name: project.name,
+                    status: project.status,
+                    client: project.client,
+                    updatedAt: project.updatedAt.toISOString(),
+                },
+                incompleteRequirements: project.requirements,
+                notesWithPossibleTodos: project.notes.map((note) => ({ ...note, updatedAt: note.updatedAt.toISOString() })),
+                invoiceAlert:
+                    project.invoice && project.invoice.status !== "Pagado"
+                        ? {
+                              ...project.invoice,
+                              amountClp: formatClp(project.invoice.amount),
+                              dueDate: project.invoice.dueDate.toISOString(),
+                              overdue: project.invoice.dueDate < today,
+                          }
+                        : null,
+            };
+        },
+    }),
+    prepararCorreoProyecto: tool({
+        description:
+            "Prepara un borrador de correo para cliente usando datos del proyecto, requisitos y notas. No envia el correo y no incluye secretos.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+            objetivo: z.string().min(1).max(300).describe("Objetivo del correo: seguimiento, cobro, avance, solicitud de feedback, etc."),
+        }),
+        execute: async ({ projectId, projectName, objetivo }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const project = await prisma.project.findUnique({
+                where: { id: resolved.project.id },
+                select: {
+                    name: true,
+                    status: true,
+                    updatedAt: true,
+                    client: { select: { name: true, email: true } },
+                    requirements: {
+                        where: { completed: false },
+                        take: 8,
+                        select: { description: true, priority: true },
+                    },
+                    notes: {
+                        orderBy: { updatedAt: "desc" },
+                        take: 5,
+                        select: { title: true, content: true },
+                    },
+                    invoice: { select: { number: true, amount: true, status: true, dueDate: true } },
+                },
+            });
+
+            if (!project) return { error: "No encontre el proyecto." };
+
+            return {
+                objetivo,
+                to: project.client.email ?? "",
+                subject: `${project.name} - ${objetivo}`,
+                context: {
+                    project: project.name,
+                    client: project.client.name,
+                    status: project.status,
+                    updatedAt: project.updatedAt.toISOString(),
+                    pendingRequirements: project.requirements,
+                    recentNotes: project.notes,
+                    invoice: project.invoice
+                        ? {
+                              ...project.invoice,
+                              amountClp: formatClp(project.invoice.amount),
+                              dueDate: project.invoice.dueDate.toISOString(),
+                          }
+                        : null,
+                },
+                instruction: "Redacta el correo en la respuesta final. No inventes compromisos ni fechas.",
+            };
+        },
+    }),
+    enviarCorreo: tool({
+        description:
+            "Envia un correo mediante Resend. Requiere confirmacion explicita. Puede usar el email del cliente de un proyecto si se entrega projectId/projectName. No debe incluir secretos, credenciales, tokens ni contrasenas.",
+        inputSchema: z.object({
+            to: z.string().default("").describe("Destinatario. Opcional si se indica un proyecto con email de cliente."),
+            projectId: z.string().default("").describe("ID del proyecto para resolver el email del cliente. Opcional."),
+            projectName: z.string().default("").describe("Nombre del proyecto para resolver el email del cliente. Opcional."),
+            subject: z.string().min(1).max(160).describe("Asunto del correo."),
+            body: z.string().min(1).max(6000).describe("Cuerpo del correo en texto plano."),
+            confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente enviar este correo."),
+        }),
+        execute: async ({ to, projectId, projectName, subject, body, confirmado }) => {
+            let recipient = to.trim();
+            let projectContext: { id: string; name: string; client: { name: string; email: string | null } } | null = null;
+
+            if (!recipient && (projectId.trim() || projectName.trim() || context.currentProjectId)) {
+                const resolved = await resolveProjectForTool({
+                    projectId: projectId.trim() || undefined,
+                    projectName,
+                    contextProjectId: context.currentProjectId,
+                });
+
+                if (!resolved.project) return resolved;
+
+                const project = await prisma.project.findUnique({
+                    where: { id: resolved.project.id },
+                    select: {
+                        id: true,
+                        name: true,
+                        client: { select: { name: true, email: true } },
+                    },
+                });
+
+                if (!project) return { error: "No encontre el proyecto." };
+                projectContext = project;
+                recipient = project.client.email ?? "";
+            }
+
+            if (!recipient || !isValidEmail(recipient)) {
+                return { error: "Necesito un email de destinatario valido antes de enviar." };
+            }
+
+            if (/(contrase|password|token|api key|secret|credencial|boveda|llave)/i.test(body)) {
+                return { error: "No puedo enviar correos que parezcan contener secretos o credenciales." };
+            }
+
+            if (!confirmado) {
+                return confirmationRequired("enviarCorreo", {
+                    to: recipient,
+                    subject,
+                    body,
+                    project: projectContext ? { id: projectContext.id, name: projectContext.name, client: projectContext.client.name } : null,
+                });
+            }
+
+            const result = await sendEmail({
+                to: recipient,
+                subject,
+                text: body,
+            });
+
+            return {
+                sent: true,
+                resendId: result?.id ?? null,
+                to: recipient,
+                subject,
             };
         },
     }),

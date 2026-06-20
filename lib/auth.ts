@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export const SESSION_COOKIE_NAME = "notecode_session";
 export const LAST_LOGIN_EMAIL_COOKIE = "notecode_last_email";
+export const RECENT_WEBAUTHN_COOKIE = "notecode_recent_webauthn";
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 const PASSWORD_KEY_LENGTH = 64;
@@ -100,6 +101,39 @@ export function createSessionCookie(userId: string) {
       maxAge: getSessionMaxAge(),
     },
   };
+}
+
+export function createRecentWebAuthnToken(userId: string) {
+  const expiresAt = Date.now() + 1000 * 60 * 5;
+  const encodedPayload = Buffer.from(JSON.stringify({ userId, expiresAt, nonce: randomUUID() }), "utf8").toString("base64url");
+
+  return `${encodedPayload}.${sign(encodedPayload)}`;
+}
+
+export function verifyRecentWebAuthnToken(token: string | undefined, userId: string) {
+  if (!token) return false;
+
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return false;
+
+  const expectedSignature = sign(encodedPayload);
+  const signatureBuffer = Buffer.from(signature, "hex");
+  const expectedBuffer = Buffer.from(expectedSignature, "hex");
+
+  if (signatureBuffer.byteLength !== expectedBuffer.byteLength || !timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
+      userId?: string;
+      expiresAt?: number;
+    };
+
+    return payload.userId === userId && typeof payload.expiresAt === "number" && payload.expiresAt > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 export async function verifySessionToken(token: string | undefined): Promise<AuthUser | null> {

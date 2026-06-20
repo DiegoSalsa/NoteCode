@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Copy, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
 import { deletePersonalSecret, revealPersonalSecret } from "@/app/actions/profile";
+import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 
 type PersonalSecretCardProps = {
   secret: {
@@ -16,6 +17,7 @@ type PersonalSecretCardProps = {
 export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) {
   const [value, setValue] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const isRevealed = value !== null;
@@ -27,18 +29,30 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
     }
 
     startTransition(async () => {
-      const revealed = await revealPersonalSecret(secret.id);
-      setValue(revealed);
+      try {
+        setError("");
+        await ensureRecentWebAuthn();
+        const revealed = await revealPersonalSecret(secret.id);
+        setValue(revealed);
+      } catch (caughtError) {
+        setError(caughtError instanceof Error ? caughtError.message : "No se pudo revelar la clave.");
+      }
     });
   }
 
   async function copySecret() {
-    const secretValue = value ?? (await revealPersonalSecret(secret.id));
+    try {
+      setError("");
+      await ensureRecentWebAuthn();
+      const secretValue = value ?? (await revealPersonalSecret(secret.id));
 
-    await navigator.clipboard.writeText(secretValue);
-    setValue(secretValue);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(secretValue);
+      setValue(secretValue);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "No se pudo copiar la clave.");
+    }
   }
 
   return (
@@ -92,6 +106,8 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
           </form>
         </div>
       </div>
+
+      {error && <p className="mt-3 text-[12px] text-red-400">{error}</p>}
     </article>
   );
 }

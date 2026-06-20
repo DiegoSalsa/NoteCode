@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { revealCredential } from "@/app/actions/credentials";
+import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 
 type CredentialCardProps = {
   credential: {
@@ -31,21 +32,28 @@ export function CredentialCard({ credential }: CredentialCardProps) {
     setError(null);
     startTransition(async () => {
       try {
+        await ensureRecentWebAuthn();
         const revealedSecret = await revealCredential(credential.id);
         setSecret(revealedSecret);
-      } catch {
-        setError("No se pudo revelar la credencial.");
+      } catch (caughtError) {
+        setError(caughtError instanceof Error ? caughtError.message : "No se pudo revelar la credencial.");
       }
     });
   }
 
   async function handleCopy() {
-    const valueToCopy = secret ?? (await revealCredential(credential.id));
+    try {
+      setError(null);
+      await ensureRecentWebAuthn();
+      const valueToCopy = secret ?? (await revealCredential(credential.id));
 
-    await navigator.clipboard.writeText(valueToCopy);
-    setSecret(valueToCopy);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+      await navigator.clipboard.writeText(valueToCopy);
+      setSecret(valueToCopy);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "No se pudo copiar la credencial.");
+    }
   }
 
   return (
