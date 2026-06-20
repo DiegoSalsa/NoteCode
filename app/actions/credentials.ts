@@ -1,9 +1,8 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
-import { getCurrentUser, RECENT_WEBAUTHN_COOKIE, verifyRecentWebAuthnToken } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 type SaveCredentialInput = {
   projectId?: string;
@@ -37,17 +36,10 @@ export async function saveCredential(data: SaveCredentialInput) {
   return credential;
 }
 
-export async function revealCredential(credentialId: string, reauthToken?: string) {
+export async function revealCredential(credentialId: string) {
   const user = await getCurrentUser();
-  const cookieStore = await cookies();
 
-  const cookieToken = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
-  if (
-    !user ||
-    (!verifyRecentWebAuthnToken(cookieToken, user.id) && !verifyRecentWebAuthnToken(reauthToken, user.id))
-  ) {
-    throw new Error("Necesitas verificar tu huella para revelar secretos.");
-  }
+  if (!user) throw new Error("Unauthorized.");
 
   if (!credentialId) {
     throw new Error("credentialId is required.");

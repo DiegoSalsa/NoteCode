@@ -1,10 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
-import { getCurrentUser, RECENT_WEBAUTHN_COOKIE, verifyRecentWebAuthnToken } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 async function requireUser() {
   const user = await getCurrentUser();
@@ -83,14 +82,8 @@ export async function savePersonalSecret(formData: FormData) {
   revalidatePath("/perfil");
 }
 
-export async function revealPersonalSecret(secretId: string, reauthToken?: string) {
+export async function revealPersonalSecret(secretId: string) {
   const user = await requireUser();
-  const cookieStore = await cookies();
-
-  const cookieToken = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
-  if (!verifyRecentWebAuthnToken(cookieToken, user.id) && !verifyRecentWebAuthnToken(reauthToken, user.id)) {
-    throw new Error("Necesitas verificar tu huella para revelar secretos.");
-  }
 
   const secret = await prisma.personalSecret.findFirst({
     where: {
