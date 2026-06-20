@@ -31,8 +31,8 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
     startTransition(async () => {
       try {
         setError("");
-        await ensureRecentWebAuthn();
-        const revealed = await revealPersonalSecret(secret.id);
+        const reauthToken = await ensureRecentWebAuthn();
+        const revealed = await revealPersonalSecret(secret.id, reauthToken);
         setValue(revealed);
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : "No se pudo revelar la clave.");
@@ -43,8 +43,8 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
   async function copySecret() {
     try {
       setError("");
-      await ensureRecentWebAuthn();
-      const secretValue = value ?? (await revealPersonalSecret(secret.id));
+      const reauthToken = await ensureRecentWebAuthn();
+      const secretValue = value ?? (await revealPersonalSecret(secret.id, reauthToken));
 
       await navigator.clipboard.writeText(secretValue);
       setValue(secretValue);

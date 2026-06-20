@@ -32,8 +32,8 @@ export function CredentialCard({ credential }: CredentialCardProps) {
     setError(null);
     startTransition(async () => {
       try {
-        await ensureRecentWebAuthn();
-        const revealedSecret = await revealCredential(credential.id);
+        const reauthToken = await ensureRecentWebAuthn();
+        const revealedSecret = await revealCredential(credential.id, reauthToken);
         setSecret(revealedSecret);
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : "No se pudo revelar la credencial.");
@@ -44,8 +44,8 @@ export function CredentialCard({ credential }: CredentialCardProps) {
   async function handleCopy() {
     try {
       setError(null);
-      await ensureRecentWebAuthn();
-      const valueToCopy = secret ?? (await revealCredential(credential.id));
+      const reauthToken = await ensureRecentWebAuthn();
+      const valueToCopy = secret ?? (await revealCredential(credential.id, reauthToken));
 
       await navigator.clipboard.writeText(valueToCopy);
       setSecret(valueToCopy);

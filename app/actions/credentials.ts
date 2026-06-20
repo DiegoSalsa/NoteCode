@@ -37,11 +37,15 @@ export async function saveCredential(data: SaveCredentialInput) {
   return credential;
 }
 
-export async function revealCredential(credentialId: string) {
+export async function revealCredential(credentialId: string, reauthToken?: string) {
   const user = await getCurrentUser();
   const cookieStore = await cookies();
 
-  if (!user || !verifyRecentWebAuthnToken(cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value, user.id)) {
+  const cookieToken = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
+  if (
+    !user ||
+    (!verifyRecentWebAuthnToken(cookieToken, user.id) && !verifyRecentWebAuthnToken(reauthToken, user.id))
+  ) {
     throw new Error("Necesitas verificar tu huella para revelar secretos.");
   }
 

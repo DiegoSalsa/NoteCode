@@ -16,8 +16,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Clave incorrecta." }, { status: 401 });
   }
 
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(RECENT_WEBAUTHN_COOKIE, createRecentWebAuthnToken(user.id), {
+  const token = createRecentWebAuthnToken(user.id);
+  const response = NextResponse.json({ ok: true, token });
+  response.cookies.set(RECENT_WEBAUTHN_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

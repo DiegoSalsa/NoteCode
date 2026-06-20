@@ -83,11 +83,12 @@ export async function savePersonalSecret(formData: FormData) {
   revalidatePath("/perfil");
 }
 
-export async function revealPersonalSecret(secretId: string) {
+export async function revealPersonalSecret(secretId: string, reauthToken?: string) {
   const user = await requireUser();
   const cookieStore = await cookies();
 
-  if (!verifyRecentWebAuthnToken(cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value, user.id)) {
+  const cookieToken = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
+  if (!verifyRecentWebAuthnToken(cookieToken, user.id) && !verifyRecentWebAuthnToken(reauthToken, user.id)) {
     throw new Error("Necesitas verificar tu huella para revelar secretos.");
   }
 

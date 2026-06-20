@@ -3,24 +3,24 @@
 import { startAuthentication } from "@simplewebauthn/browser";
 
 const RECENT_REAUTH_KEY = "notecode.recentWebAuthnAt";
+const RECENT_REAUTH_TOKEN_KEY = "notecode.recentWebAuthnToken";
 const RECENT_REAUTH_MS = 1000 * 60 * 4;
 
 export async function ensureRecentWebAuthn() {
   if (typeof window === "undefined") return;
 
   const lastAuthAt = Number(window.sessionStorage.getItem(RECENT_REAUTH_KEY) ?? 0);
-  if (Date.now() - lastAuthAt < RECENT_REAUTH_MS) return;
+  const token = window.sessionStorage.getItem(RECENT_REAUTH_TOKEN_KEY);
+  if (token && Date.now() - lastAuthAt < RECENT_REAUTH_MS) return token;
 
   if (!("PublicKeyCredential" in window)) {
-    await ensureRecentPasswordAuth();
-    return;
+    return ensureRecentPasswordAuth();
   }
 
   try {
-    await ensureRecentPasskeyAuth();
-    return;
+    return await ensureRecentPasskeyAuth();
   } catch {
-    await ensureRecentPasswordAuth();
+    return ensureRecentPasswordAuth();
   }
 }
 
@@ -44,6 +44,8 @@ async function ensureRecentPasskeyAuth() {
   }
 
   window.sessionStorage.setItem(RECENT_REAUTH_KEY, String(Date.now()));
+  window.sessionStorage.setItem(RECENT_REAUTH_TOKEN_KEY, result.token);
+  return result.token as string;
 }
 
 async function ensureRecentPasswordAuth() {
@@ -65,4 +67,6 @@ async function ensureRecentPasswordAuth() {
   }
 
   window.sessionStorage.setItem(RECENT_REAUTH_KEY, String(Date.now()));
+  window.sessionStorage.setItem(RECENT_REAUTH_TOKEN_KEY, result.token);
+  return result.token as string;
 }
