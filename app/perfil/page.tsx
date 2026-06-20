@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { changePassword } from "@/app/actions/auth";
 import { savePersonalSecret, updateProfile } from "@/app/actions/profile";
+import PasskeySettings from "@/components/PasskeySettings";
 import PersonalSecretCard from "@/components/PersonalSecretCard";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -25,6 +26,11 @@ export default async function ProfilePage() {
             notes: true,
           },
         },
+        passkeys: {
+          select: {
+            id: true,
+          },
+        },
       },
     })) ??
       (await prisma.userProfile.create({
@@ -41,6 +47,11 @@ export default async function ProfilePage() {
               name: true,
               username: true,
               notes: true,
+            },
+          },
+          passkeys: {
+            select: {
+              id: true,
             },
           },
         },
@@ -194,6 +205,8 @@ export default async function ProfilePage() {
             </button>
           </div>
         </form>
+
+        <PasskeySettings passkeyCount={profile.passkeys.length} />
       </section>
 
       <section className="space-y-3">

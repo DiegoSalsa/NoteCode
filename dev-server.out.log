@@ -1,96 +1,25 @@
 
 > notecode@1.0.0 dev
-> next dev --hostname 127.0.0.1 --port 3000
+> next dev
 
    ▲ Next.js 15.5.19
-   - Local:        http://127.0.0.1:3000
-   - Network:      http://127.0.0.1:3000
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.9:3000
    - Environments: .env
 
  ✓ Starting...
- ✓ Ready in 1985ms
- ✓ Compiled /middleware in 186ms (115 modules)
+ ✓ Ready in 2.7s
+ ✓ Compiled /middleware in 406ms (115 modules)
  ○ Compiling / ...
- ✓ Compiled / in 1563ms (1108 modules)
- GET / 200 in 2132ms
- ✓ Compiled in 188ms (430 modules)
- ✓ Compiled in 122ms (430 modules)
- ✓ Compiled in 146ms (430 modules)
- ✓ Compiled in 104ms (430 modules)
- ✓ Compiled in 132ms (430 modules)
- ✓ Compiled in 160ms (430 modules)
- ✓ Compiled in 292ms (430 modules)
- ✓ Compiled in 284ms (430 modules)
- ✓ Compiled in 95ms (430 modules)
- ✓ Compiled in 98ms (430 modules)
- ✓ Compiled in 115ms (430 modules)
- ✓ Compiled in 122ms (430 modules)
- ✓ Compiled in 154ms (430 modules)
- ✓ Compiled in 452ms (430 modules)
- ✓ Compiled in 263ms (430 modules)
- ✓ Compiled in 204ms (531 modules)
- ✓ Compiled in 507ms (430 modules)
- ✓ Compiled in 320ms (429 modules)
- ✓ Compiled in 242ms (429 modules)
- ✓ Compiled in 151ms (429 modules)
- ✓ Compiled in 365ms (429 modules)
- ✓ Compiled in 138ms (429 modules)
- ✓ Compiled in 208ms (429 modules)
- ✓ Compiled in 224ms (429 modules)
- ✓ Compiled in 251ms (429 modules)
- ✓ Compiled in 219ms (429 modules)
- ✓ Compiled in 214ms (429 modules)
- ✓ Compiled in 97ms (429 modules)
- ✓ Compiled in 175ms (429 modules)
- ✓ Compiled in 91ms (429 modules)
- ✓ Compiled in 91ms (429 modules)
- ✓ Compiled in 148ms (429 modules)
- ✓ Compiled in 147ms (429 modules)
- ✓ Compiled in 91ms (429 modules)
- ✓ Compiled in 135ms (429 modules)
- ✓ Compiled in 95ms (429 modules)
- ✓ Compiled in 133ms (429 modules)
- ✓ Compiled in 139ms (429 modules)
- ✓ Compiled in 161ms (429 modules)
- ✓ Compiled in 97ms (429 modules)
- ✓ Compiled in 102ms (429 modules)
- ✓ Compiled in 133ms (429 modules)
- ✓ Compiled in 143ms (429 modules)
- ✓ Compiled in 95ms (429 modules)
- ✓ Compiled in 134ms (429 modules)
- ✓ Compiled in 85ms (429 modules)
- ✓ Compiled in 90ms (429 modules)
- ✓ Compiled in 92ms (429 modules)
- ✓ Compiled in 124ms (429 modules)
- ✓ Compiled in 92ms (429 modules)
- ✓ Compiled in 104ms (429 modules)
- ✓ Compiled in 394ms (430 modules)
- ✓ Compiled in 156ms (430 modules)
- ✓ Compiled in 96ms (430 modules)
- ✓ Compiled in 103ms (430 modules)
- ✓ Compiled in 97ms (430 modules)
- ✓ Compiled in 202ms (545 modules)
- ✓ Compiled in 106ms (430 modules)
- ○ Compiling / ...
- ✓ Compiled / in 652ms (1116 modules)
- GET /manifest.webmanifest 200 in 793ms
- GET / 200 in 962ms
- GET /manifest.webmanifest 200 in 17ms
- GET /manifest.webmanifest 200 in 11ms
- ✓ Compiled in 118ms (431 modules)
- ✓ Compiled in 554ms (1133 modules)
- ✓ Compiled in 205ms (547 modules)
- GET /manifest.webmanifest 200 in 79ms
- GET /manifest.webmanifest 200 in 31ms
- GET / 200 in 112ms
- GET / 200 in 17ms
- ✓ Compiled in 262ms (1133 modules)
- GET /manifest.webmanifest 200 in 39ms
- GET / 200 in 93ms
- GET / 200 in 19ms
- ✓ Compiled in 345ms (1133 modules)
- GET / 200 in 31ms
- GET /manifest.webmanifest 200 in 10ms
- GET /manifest.webmanifest 200 in 9ms
- GET / 200 in 17ms
- GET /manifest.webmanifest 200 in 11ms
+ ✓ Compiled / in 3.8s (1150 modules)
+ GET / 200 in 4525ms
+ GET / 200 in 129ms
+ ✓ Compiled in 389ms (451 modules)
+ ✓ Compiled in 461ms (528 modules)
+ ✓ Compiled in 250ms (427 modules)
+ ✓ Compiled in 174ms (528 modules)
+ ✓ Compiled in 170ms (427 modules)
+ ✓ Compiled in 383ms (427 modules)
+ ✓ Compiled in 218ms (427 modules)
+ ✓ Compiled in 191ms (427 modules)
+ ✓ Compiled in 233ms (427 modules)

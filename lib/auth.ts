@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
 export const SESSION_COOKIE_NAME = "notecode_session";
+export const LAST_LOGIN_EMAIL_COOKIE = "notecode_last_email";
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 const PASSWORD_KEY_LENGTH = 64;
@@ -85,6 +86,20 @@ export function createSessionToken(userId: string) {
   const signature = sign(encodedPayload);
 
   return `${encodedPayload}.${signature}`;
+}
+
+export function createSessionCookie(userId: string) {
+  return {
+    name: SESSION_COOKIE_NAME,
+    value: createSessionToken(userId),
+    options: {
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: getSessionMaxAge(),
+    },
+  };
 }
 
 export async function verifySessionToken(token: string | undefined): Promise<AuthUser | null> {

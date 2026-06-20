@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/", "/establecer-clave", "/manifest.webmanifest", "/sw.js"];
+const PUBLIC_PATHS = [
+  "/",
+  "/establecer-clave",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/api/webauthn/login/options",
+  "/api/webauthn/login/verify",
+];
 const SESSION_COOKIE_NAME = "notecode_session";
 
 let cachedSecret: string | undefined;

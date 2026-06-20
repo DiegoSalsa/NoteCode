@@ -183,9 +183,27 @@ model UserProfile {
   updatedAt       DateTime         @updatedAt @map("updated_at")
   personalSecrets PersonalSecret[]
   authTokens      AuthToken[]
+  passkeys        Passkey[]
 
   @@index([email])
   @@map("user_profiles")
+}
+
+model Passkey {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  user         UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  credentialId String      @unique @map("credential_id")
+  publicKey    Bytes       @map("public_key")
+  counter      Int         @default(0)
+  transports   String[]    @default([])
+  deviceType   String      @map("device_type")
+  backedUp     Boolean     @default(false) @map("backed_up")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  lastUsedAt   DateTime?   @map("last_used_at")
+
+  @@index([userId])
+  @@map("passkeys")
 }
 
 model AuthToken {

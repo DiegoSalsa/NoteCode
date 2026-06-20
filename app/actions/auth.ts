@@ -5,10 +5,10 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
-  createSessionToken,
+  createSessionCookie,
   findUserByEmail,
-  getSessionMaxAge,
   hashPassword,
+  LAST_LOGIN_EMAIL_COOKIE,
   SESSION_COOKIE_NAME,
   verifyPassword,
 } from "@/lib/auth";
@@ -108,20 +108,37 @@ function genericEmailMessage() {
 
 async function setSession(userId: string) {
   const cookieStore = await cookies();
+  const sessionCookie = createSessionCookie(userId);
 
-  cookieStore.set(SESSION_COOKIE_NAME, createSessionToken(userId), {
-    httpOnly: true,
+  cookieStore.set(sessionCookie.name, sessionCookie.value, sessionCookie.options);
+}
+
+async function rememberLoginEmail(email: string) {
+  const cookieStore = await cookies();
+
+  cookieStore.set(LAST_LOGIN_EMAIL_COOKIE, email, {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: getSessionMaxAge(),
+    maxAge: 60 * 60 * 24 * 365,
   });
+}
+
+async function forgetLoginEmail() {
+  const cookieStore = await cookies();
+
+  cookieStore.delete(LAST_LOGIN_EMAIL_COOKIE);
 }
 
 export async function login(_state: LoginState, formData: FormData): Promise<LoginState> {
   const intent = String(formData.get("intent") ?? "continue");
   const email = normalizeEmail(String(formData.get("email") ?? ""));
   const password = String(formData.get("password") ?? "");
+
+  if (intent === "switch-email") {
+    await forgetLoginEmail();
+    return { step: "email" };
+  }
 
   if (!email) {
     return { step: "email", error: "Ingresa tu correo." };
@@ -131,6 +148,8 @@ export async function login(_state: LoginState, formData: FormData): Promise<Log
 
   if (intent === "forgot") {
     if (user?.passwordHash) {
+      await rememberLoginEmail(user.email);
+
       try {
         await sendPasswordLink(user.email, user.id, RESET_PASSWORD);
       } catch {
@@ -148,6 +167,8 @@ export async function login(_state: LoginState, formData: FormData): Promise<Log
   if (!user) {
     return { step: "email", message: genericEmailMessage() };
   }
+
+  await rememberLoginEmail(user.email);
 
   if (!user.passwordHash) {
     try {
