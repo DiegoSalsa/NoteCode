@@ -61,6 +61,23 @@ export function clearCachedJson(key: string) {
   }
 }
 
+export function clearCachedJsonByPrefix(prefix: string) {
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) memoryCache.delete(key);
+  }
+
+  if (typeof window === "undefined") return;
+
+  try {
+    const fullPrefix = storageKey(prefix);
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(fullPrefix)) window.sessionStorage.removeItem(key);
+    }
+  } catch {
+  }
+}
+
 export async function fetchAndCacheJson<T>(key: string, url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url}`);

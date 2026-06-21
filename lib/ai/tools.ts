@@ -29,6 +29,7 @@ function isValidEmail(value: string) {
 export type GilbertoToolContext = {
     pathname?: string;
     currentProjectId?: string | null;
+    userId?: string | null;
 };
 
 async function resolveProjectForTool(input: {
@@ -674,17 +675,113 @@ export function createTools(context: GilbertoToolContext = {}) {
                 });
             }
 
-            const result = await sendEmail({
-                to: recipient,
-                subject,
-                text: body,
+            if (!context.userId) {
+                return { error: "Necesito una sesion activa para registrar y enviar correos." };
+            }
+
+            const message = await prisma.emailMessage.create({
+                data: {
+                    userId: context.userId,
+                    to: recipient,
+                    subject,
+                    body,
+                    status: "sending",
+                    source: "gilberto",
+                },
             });
+
+            let result: { id?: string } | null = null;
+
+            try {
+                result = await sendEmail({
+                    to: recipient,
+                    subject,
+                    text: body,
+                });
+
+                await prisma.emailMessage.update({
+                    where: { id: message.id },
+                    data: {
+                        status: "sent",
+                        resendId: result?.id ?? null,
+                        sentAt: new Date(),
+                        error: null,
+                    },
+                });
+            } catch (error) {
+                await prisma.emailMessage.update({
+                    where: { id: message.id },
+                    data: {
+                        status: "failed",
+                        error: error instanceof Error ? error.message : "No se pudo enviar el correo.",
+                    },
+                });
+
+                return { error: "Resend no pudo enviar el correo. Quedo registrado como fallido en el Centro de correos." };
+            }
 
             return {
                 sent: true,
                 resendId: result?.id ?? null,
                 to: recipient,
                 subject,
+            };
+        },
+    }),
+    guardarBorradorCorreo: tool({
+        description:
+            "Guarda un borrador en el Centro de correos. Puede resolver destinatario desde el proyecto actual. No envia el correo.",
+        inputSchema: z.object({
+            to: z.string().default("").describe("Destinatario. Opcional si se indica un proyecto con email de cliente."),
+            projectId: z.string().default("").describe("ID del proyecto para resolver el email del cliente. Opcional."),
+            projectName: z.string().default("").describe("Nombre del proyecto para resolver el email del cliente. Opcional."),
+            subject: z.string().min(1).max(160).describe("Asunto del correo."),
+            body: z.string().min(1).max(6000).describe("Cuerpo del correo en texto plano."),
+        }),
+        execute: async ({ to, projectId, projectName, subject, body }) => {
+            if (!context.userId) {
+                return { error: "Necesito una sesion activa para guardar borradores." };
+            }
+
+            let recipient = to.trim();
+
+            if (!recipient && (projectId.trim() || projectName.trim() || context.currentProjectId)) {
+                const resolved = await resolveProjectForTool({
+                    projectId: projectId.trim() || undefined,
+                    projectName,
+                    contextProjectId: context.currentProjectId,
+                });
+
+                if (!resolved.project) return resolved;
+
+                const project = await prisma.project.findUnique({
+                    where: { id: resolved.project.id },
+                    select: { client: { select: { email: true } } },
+                });
+
+                recipient = project?.client.email ?? "";
+            }
+
+            if (!recipient || !isValidEmail(recipient)) {
+                return { error: "Necesito un email de destinatario valido para guardar el borrador." };
+            }
+
+            const draft = await prisma.emailMessage.create({
+                data: {
+                    userId: context.userId,
+                    to: recipient,
+                    subject,
+                    body,
+                    status: "draft",
+                    source: "gilberto",
+                },
+            });
+
+            return {
+                saved: true,
+                id: draft.id,
+                to: draft.to,
+                subject: draft.subject,
             };
         },
     }),

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
-import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { clearCachedJsonByPrefix, fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Note = {
@@ -99,23 +99,39 @@ export default function NotasPage() {
         e.preventDefault();
         setSaving(true);
         try {
+            let savedNote: Note;
+
             if (editing) {
-                await fetch(`/api/notes/${editing.id}`, {
+                const response = await fetch(`/api/notes/${editing.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(form),
                 });
+
+                if (!response.ok) throw new Error("Failed to update note");
+                savedNote = await response.json();
+                setNotes((current) => current.map((note) => note.id === savedNote.id ? savedNote : note));
+                setSelectedNoteId(savedNote.id);
             } else {
-                await fetch("/api/notes", {
+                const response = await fetch("/api/notes", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(form),
                 });
+
+                if (!response.ok) throw new Error("Failed to create note");
+                savedNote = await response.json();
+                setNotes((current) => [savedNote, ...current]);
+                setSelectedNoteId(savedNote.id);
+                setTotal((current) => current + 1);
             }
+            clearCachedJsonByPrefix("notes:");
+            setAvailableFolders((current) => [...new Set([...current, savedNote.folder])]);
             setModalOpen(false);
-            await fetchNotes();
+            setEditing(null);
         } catch (err) {
             console.error(err);
+            setError(editing ? "No se pudo actualizar la nota." : "No se pudo crear la nota.");
         } finally {
             setSaving(false);
         }

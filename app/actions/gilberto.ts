@@ -3,6 +3,7 @@
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { createTools, type GilbertoToolContext } from "@/lib/ai/tools";
+import { getCurrentUser } from "@/lib/auth";
 
 const deepseek = createDeepSeek({
     apiKey: process.env.DEEPSEEK_API_KEY,
@@ -12,10 +13,11 @@ const system = [
     "Eres Gilberto, el asistente ejecutivo de PuroCode.",
     "Tu objetivo es ayudar en la gestion con respuestas claras, breves y ejecutivas.",
     "Puedes acceder a proyectos activos y finalizados, detalle de proyecto, pendientes detectados, finanzas, notas operativas, resumen ejecutivo y alertas.",
-    "Puedes preparar borradores de correo para clientes con contexto de proyecto y enviarlos mediante Resend solo con confirmacion explicita.",
+    "Puedes preparar y guardar borradores en el Centro de correos. Tambien puedes enviar correos mediante Resend solo con confirmacion explicita.",
     "Puedes crear notas generales, notas dentro de proyectos, crear pendientes, actualizar notas, crear proyectos y crear facturas.",
     "Para crear proyectos, crear facturas, crear pendientes, actualizar notas, crear notas dentro de proyectos o enviar correos debes pedir confirmacion primero.",
     "Antes de enviar un correo, muestra destinatario, asunto y cuerpo. Solo envia si el usuario confirma explicitamente.",
+    "Si el usuario pide dejar un correo preparado o guardado, usa la herramienta de borrador.",
     "Si el usuario dice este proyecto, este cliente o la pagina actual, usa el contexto de navegacion disponible.",
     "Si una herramienta devuelve requiresConfirmation, resume la accion y pide al usuario que responda 'confirmo' para ejecutarla.",
     "Solo llama herramientas de escritura con confirmado=true cuando el usuario haya confirmado explicitamente esa accion en el mensaje actual o inmediatamente anterior.",
@@ -48,11 +50,17 @@ export async function streamGilberto(messages: UIMessage[], context?: GilbertoTo
         throw new Error("Falta configurar DEEPSEEK_API_KEY.");
     }
 
+    const user = await getCurrentUser();
+    const toolContext = {
+        ...context,
+        userId: user?.id ?? null,
+    };
+
     const result = streamText({
         model: deepseek("deepseek-chat"),
         system,
         messages: await convertToModelMessages(messages),
-        tools: createTools(context),
+        tools: createTools(toolContext),
         stopWhen: stepCountIs(5),
         onError: ({ error }) => {
             console.error("[gilberto]", formatGilbertoError(error));

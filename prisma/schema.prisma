@@ -184,9 +184,30 @@ model UserProfile {
   personalSecrets PersonalSecret[]
   authTokens      AuthToken[]
   passkeys        Passkey[]
+  emailMessages   EmailMessage[]
 
   @@index([email])
   @@map("user_profiles")
+}
+
+model EmailMessage {
+  id        String      @id @default(uuid())
+  userId    String      @map("user_id")
+  user      UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  to        String
+  subject   String
+  body      String
+  status    String      @default("draft")
+  source    String      @default("manual")
+  resendId  String?     @map("resend_id")
+  error     String?
+  sentAt    DateTime?   @map("sent_at")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  @@index([userId, status, updatedAt])
+  @@index([sentAt])
+  @@map("email_messages")
 }
 
 model Passkey {
