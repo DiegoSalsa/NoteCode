@@ -55,7 +55,7 @@ export async function DELETE(
         const { id } = await params;
     const document = await prisma.document.findUnique({
       where: { id },
-      select: { storagePath: true, storageBucket: true },
+      select: { storagePath: true, storageBucket: true, projectId: true },
     });
 
     if (!document) {
@@ -70,6 +70,9 @@ export async function DELETE(
       });
     }
     invalidateCache("documents");
+    if (document.projectId) {
+      invalidateCache(`project:${document.projectId}`);
+    }
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete document" }, { status: 500 });

@@ -8,13 +8,16 @@ import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 import {
     ArrowLeft,
     CalendarDays,
+    Download,
     Eye,
     EyeOff,
+    FileText,
     Plus,
     Trash2,
     Check,
     ExternalLink,
     Pencil,
+    Upload,
     X,
     GripVertical,
 } from "lucide-react";
@@ -76,6 +79,15 @@ type ProjectNote = {
     updatedAt: string;
 };
 
+type ProjectDocument = {
+    id: string;
+    name: string;
+    category: string;
+    size: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
 type TimelineItem = {
     id: string;
     type: string;
@@ -92,6 +104,7 @@ type ProjectDetailPayload = {
     techs: Tech[];
     credentials: Credential[];
     notes: ProjectNote[];
+    documents: ProjectDocument[];
     timeline: TimelineItem[];
 };
 
@@ -100,6 +113,13 @@ const TASK_STATUSES = ["Por hacer", "En progreso", "Bloqueado", "Hecho"];
 const REQ_CATEGORIES = ["Funcional", "Técnico", "UX/UI", "Seguridad"];
 const PRIORITIES = ["Alta", "Media", "Baja"];
 const TECH_CATEGORIES = ["Frontend", "Backend", "DevOps", "Base de Datos", "Herramientas"];
+const DOC_CATEGORIES = ["General", "Contratos", "Cotizaciones", "Diseño", "Legal"];
+
+function formatBytes(size: number) {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function asArray<T>(value: unknown): T[] {
     return Array.isArray(value) ? value : [];
@@ -143,6 +163,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [techs, setTechs] = useState<Tech[]>(() => asArray<Tech>(cached?.techs));
     const [creds, setCreds] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
     const [notes, setNotes] = useState<ProjectNote[]>(() => asArray<ProjectNote>(cached?.notes));
+    const [documents, setDocuments] = useState<ProjectDocument[]>(() => asArray<ProjectDocument>(cached?.documents));
     const [timeline, setTimeline] = useState<TimelineItem[]>(() => asArray<TimelineItem>(cached?.timeline));
     const [loading, setLoading] = useState(!cached);
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
@@ -179,6 +200,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [noteTitle, setNoteTitle] = useState("");
     const [noteContent, setNoteContent] = useState("");
 
+    // Document form
+    const [docOpen, setDocOpen] = useState(false);
+    const [docSaving, setDocSaving] = useState(false);
+    const [docForm, setDocForm] = useState({ name: "", category: "General", file: null as File | null });
+    const [docError, setDocError] = useState("");
+
     const fetchAll = useCallback(async () => {
         try {
             const data = await fetchAndCacheJson<ProjectDetailPayload>(`project:${id}`, `/api/projects/${id}`);
@@ -189,6 +216,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             setTechs(asArray<Tech>(data.techs));
             setCreds(asArray<Credential>(data.credentials));
             setNotes(asArray<ProjectNote>(data.notes));
+            setDocuments(asArray<ProjectDocument>(data.documents));
             setTimeline(asArray<TimelineItem>(data.timeline));
         } catch {
             setProject(null);
@@ -361,6 +389,40 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         await fetchAll();
     }
 
+    async function uploadDocument(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!docForm.file) {
+            setDocError("Selecciona un archivo para subir.");
+            return;
+        }
+        setDocSaving(true);
+        setDocError("");
+        try {
+            const body = new FormData();
+            body.set("file", docForm.file);
+            body.set("name", docForm.name);
+            body.set("category", docForm.category);
+            const response = await fetch(`/api/projects/${id}/documents`, { method: "POST", body });
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                throw new Error(data?.error || "No se pudo subir el documento.");
+            }
+            setDocOpen(false);
+            setDocForm({ name: "", category: "General", file: null });
+            await fetchAll();
+        } catch (err) {
+            setDocError(err instanceof Error ? err.message : "No se pudo subir el documento.");
+        } finally {
+            setDocSaving(false);
+        }
+    }
+
+    async function deleteDocument(docId: string) {
+        if (!confirm("¿Eliminar este documento?")) return;
+        await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+        await fetchAll();
+    }
+
     async function toggleReveal(cId: string) {
         if (!revealed.has(cId) && !revealedSecrets[cId]) {
             try {
@@ -406,6 +468,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         { key: "techs", label: "Tecnologías", count: techs.length },
         { key: "credentials", label: "Credenciales", count: creds.length },
         { key: "notes", label: "Notas", count: notes.length },
+        { key: "documents", label: "Documentos", count: documents.length },
     ];
 
     return (
@@ -441,23 +504,26 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </div>
 
             {/* Tabs */}
-            <div className="-mx-4 overflow-x-auto border-b border-white/10 px-4 sm:mx-0 sm:px-0">
-                <div className="flex min-w-max gap-0">
-                {tabs.map((t) => (
-                    <button
-                        key={t.key}
-                        onClick={() => setTab(t.key)}
-                        className={`relative px-4 py-2.5 text-[13px] font-medium transition-colors ${tab === t.key ? "text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
-                            }`}
-                    >
-                        {t.label}
-                        {t.count !== null && (
-                            <span className="ml-1.5 text-[11px] text-neutral-600">{t.count}</span>
-                        )}
-                        {tab === t.key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-100" />}
-                    </button>
-                ))}
+            <div className="relative -mx-4 sm:mx-0">
+                <div className="scrollbar-hide overflow-x-auto border-b border-white/10 px-4 sm:px-0" style={{ WebkitOverflowScrolling: "touch" }}>
+                    <div className="flex min-w-max gap-0">
+                    {tabs.map((t) => (
+                        <button
+                            key={t.key}
+                            onClick={() => setTab(t.key)}
+                            className={`relative shrink-0 px-4 py-2.5 text-[13px] font-medium transition-colors ${tab === t.key ? "text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
+                                }`}
+                        >
+                            {t.label}
+                            {t.count !== null && (
+                                <span className="ml-1.5 text-[11px] text-neutral-600">{t.count}</span>
+                            )}
+                            {tab === t.key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-100" />}
+                        </button>
+                    ))}
+                    </div>
                 </div>
+                <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-neutral-950 to-transparent sm:hidden" />
             </div>
 
             {/* Tab: Overview */}
@@ -757,6 +823,130 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                     <input required placeholder="Título de la nota" value={noteTitle} onChange={e => setNoteTitle(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <textarea rows={6} placeholder="Contenido..." value={noteContent} onChange={e => setNoteContent(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 resize-none" />
                                     <button type="submit" className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">Crear Nota</button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Tab: Documents */}
+            {tab === "documents" && (
+                <div className="space-y-4">
+                    <button
+                        onClick={() => {
+                            setDocForm({ name: "", category: "General", file: null });
+                            setDocError("");
+                            setDocOpen(true);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white"
+                    >
+                        <Plus size={14} strokeWidth={2} />
+                        Subir Documento
+                    </button>
+
+                    <div className="overflow-hidden rounded-lg border border-white/10 bg-neutral-900">
+                        {documents.map((doc, index) => (
+                            <div
+                                key={doc.id}
+                                className={`flex flex-col gap-3 px-4 py-4 transition-colors hover:bg-white/[0.03] sm:flex-row sm:items-center sm:gap-4 sm:px-5 ${
+                                    index !== documents.length - 1 ? "border-b border-white/5" : ""
+                                }`}
+                            >
+                                <div className="flex min-w-0 flex-1 items-start gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/10 bg-neutral-950">
+                                        <FileText size={17} className="text-neutral-300" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h3 className="truncate text-[14px] font-medium text-neutral-200">{doc.name}</h3>
+                                        <p className="mt-0.5 truncate text-[12px] text-neutral-500">
+                                            {doc.category} / {formatBytes(doc.size)} / {new Date(doc.updatedAt).toLocaleDateString("es-MX")}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <a
+                                        href={`/api/documents/${doc.id}`}
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100"
+                                        title="Descargar"
+                                    >
+                                        <Download size={15} strokeWidth={1.5} />
+                                    </a>
+                                    <button
+                                        type="button"
+                                        onClick={() => deleteDocument(doc.id)}
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-neutral-400 transition-colors hover:bg-white/5 hover:text-red-300"
+                                        title="Eliminar"
+                                    >
+                                        <Trash2 size={15} strokeWidth={1.5} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                        {documents.length === 0 && (
+                            <div className="px-5 py-12 text-center text-[13px] text-neutral-500">
+                                Sin documentos en este proyecto.
+                            </div>
+                        )}
+                    </div>
+
+                    {docOpen && (
+                        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
+                            <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
+                                <div className="mb-6 flex items-center justify-between">
+                                    <h2 className="text-[17px] font-semibold text-neutral-100">Subir Documento</h2>
+                                    <button onClick={() => setDocOpen(false)} className="rounded p-1 text-neutral-500 hover:bg-white/5 hover:text-neutral-200">
+                                        <X size={16} strokeWidth={1.5} />
+                                    </button>
+                                </div>
+                                {docError && (
+                                    <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+                                        {docError}
+                                    </div>
+                                )}
+                                <form onSubmit={uploadDocument} className="space-y-4">
+                                    <div>
+                                        <label className="mb-1.5 block text-[13px] font-medium text-neutral-300">Archivo</label>
+                                        <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/15 bg-neutral-950 px-4 py-5 text-center transition-colors hover:bg-white/[0.03]">
+                                            <Upload size={18} className="text-neutral-400" />
+                                            <span className="max-w-full truncate text-[13px] font-medium text-neutral-200">
+                                                {docForm.file ? docForm.file.name : "Seleccionar archivo"}
+                                            </span>
+                                            <span className="text-[11px] text-neutral-500">Máximo 12 MB</span>
+                                            <input
+                                                type="file"
+                                                required
+                                                className="hidden"
+                                                onChange={(event) => setDocForm({ ...docForm, file: event.target.files?.[0] || null })}
+                                            />
+                                        </label>
+                                    </div>
+                                    <input
+                                        value={docForm.name}
+                                        onChange={(event) => setDocForm({ ...docForm, name: event.target.value })}
+                                        className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20"
+                                        placeholder="Nombre visible (opcional)"
+                                    />
+                                    <input
+                                        value={docForm.category}
+                                        onChange={(event) => setDocForm({ ...docForm, category: event.target.value })}
+                                        list="project-doc-category-suggestions"
+                                        className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20"
+                                        placeholder="Categoría"
+                                    />
+                                    <datalist id="project-doc-category-suggestions">
+                                        {DOC_CATEGORIES.map((category) => (
+                                            <option key={category} value={category} />
+                                        ))}
+                                    </datalist>
+                                    <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+                                        <button type="button" onClick={() => setDocOpen(false)} className="flex-1 rounded-lg border border-white/10 px-4 py-2 text-[13px] font-medium text-neutral-300 hover:bg-white/5">
+                                            Cancelar
+                                        </button>
+                                        <button type="submit" disabled={docSaving} className="flex-1 rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">
+                                            {docSaving ? "Subiendo..." : "Subir"}
+                                        </button>
+                                    </div>
                                 </form>
                             </div>
                         </div>
