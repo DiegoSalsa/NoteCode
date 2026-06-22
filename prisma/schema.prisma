@@ -142,18 +142,21 @@ model Credential {
 }
 
 model Document {
-  id        String   @id @default(uuid())
-  name      String
-  category  String   @default("General")
-  mimeType  String   @map("mime_type")
-  size      Int
-  fileData  Bytes    @map("file_data")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid())
+  name        String
+  category    String   @default("General")
+  mimeType    String   @map("mime_type")
+  size        Int
+  fileData    Bytes?   @map("file_data")
+  storagePath String?  @map("storage_path")
+  storageBucket String? @map("storage_bucket")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([category])
   @@index([updatedAt])
   @@index([name])
+  @@index([storagePath])
   @@map("documents")
 }
 

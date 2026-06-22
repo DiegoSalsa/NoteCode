@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Copy, Eye, EyeOff, Plus, Search, Trash2, X } from "lucide-react";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Credential = {
@@ -119,14 +120,24 @@ export default function BovedaPage() {
       return;
     }
 
-    const secret = await revealCredential(id);
-    setRevealed((current) => ({ ...current, [id]: secret }));
+    try {
+      await ensureRecentWebAuthn();
+      const secret = await revealCredential(id);
+      setRevealed((current) => ({ ...current, [id]: secret }));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo revelar la credencial.");
+    }
   }
 
   async function copyCredential(id: string) {
-    const secret = revealed[id] ?? await revealCredential(id);
-    setRevealed((current) => ({ ...current, [id]: secret }));
-    await navigator.clipboard.writeText(secret);
+    try {
+      await ensureRecentWebAuthn();
+      const secret = revealed[id] ?? await revealCredential(id);
+      setRevealed((current) => ({ ...current, [id]: secret }));
+      await navigator.clipboard.writeText(secret);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo copiar la credencial.");
+    }
   }
 
   const filtered = credentials;

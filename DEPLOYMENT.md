@@ -23,3 +23,29 @@ db.<project-ref>.supabase.co:5432
 ```
 
 Vercel serverless functions can fail to reach that direct host. After changing environment variables in Vercel, redeploy the project so the new values are available to the runtime.
+
+## Document storage
+
+Documents can be stored in Supabase Storage so large contracts and agreements do not live in Postgres.
+
+Create a private Storage bucket, for example:
+
+```text
+documents
+```
+
+Add these environment variables in Vercel:
+
+```text
+SUPABASE_URL="https://<project-ref>.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
+SUPABASE_DOCUMENTS_BUCKET="documents"
+```
+
+Before deploying document storage changes, run this SQL once in the Supabase SQL editor:
+
+```text
+prisma/migrations-manual/20260622_documents_storage.sql
+```
+
+Existing documents stored in Postgres continue to download through the `file_data` fallback. New uploads use Storage when these variables are configured.

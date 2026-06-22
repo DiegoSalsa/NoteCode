@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 import {
     ArrowLeft,
     Eye,
@@ -256,8 +257,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function toggleReveal(cId: string) {
         if (!revealed.has(cId) && !revealedSecrets[cId]) {
-            const secret = await revealCredential(cId);
-            setRevealedSecrets(prev => ({ ...prev, [cId]: secret }));
+            try {
+                await ensureRecentWebAuthn();
+                const secret = await revealCredential(cId);
+                setRevealedSecrets(prev => ({ ...prev, [cId]: secret }));
+            } catch (error) {
+                alert(error instanceof Error ? error.message : "No se pudo revelar la credencial.");
+                return;
+            }
         }
 
         setRevealed(prev => {

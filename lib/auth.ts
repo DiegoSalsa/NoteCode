@@ -194,3 +194,10 @@ export async function getCurrentUser() {
 
   return verifySessionToken(token);
 }
+
+export async function hasRecentWebAuthn(userId: string) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
+
+  return verifyRecentWebAuthnToken(token, userId);
+}

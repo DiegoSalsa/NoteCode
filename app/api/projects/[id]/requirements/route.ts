@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
+import { z } from "zod";
+
+const requirementSchema = z.object({
+    description: z.string().trim().min(1).max(500),
+    category: z.enum(["Funcional", "No funcional"]).default("Funcional"),
+    priority: z.enum(["Baja", "Media", "Alta"]).default("Media"),
+});
 
 export async function GET(
     _request: NextRequest,
@@ -24,13 +31,17 @@ export async function POST(
 ) {
     try {
         const { id } = await params;
-        const body = await request.json();
+        const body = requirementSchema.safeParse(await request.json());
+        if (!body.success) {
+            return NextResponse.json({ error: "Invalid requirement payload" }, { status: 400 });
+        }
+
         const item = await prisma.projectRequirement.create({
             data: {
                 projectId: id,
-                description: body.description,
-                category: body.category || "Funcional",
-                priority: body.priority || "Media",
+                description: body.data.description,
+                category: body.data.category,
+                priority: body.data.priority,
             },
         });
         invalidateCache(`project:${id}`);

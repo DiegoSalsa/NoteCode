@@ -26,6 +26,9 @@ function isValidEmail(value: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+const requirementCategorySchema = z.enum(["Funcional", "No funcional"]);
+const requirementPrioritySchema = z.enum(["Baja", "Media", "Alta"]);
+
 export type GilbertoToolContext = {
     pathname?: string;
     currentProjectId?: string | null;
@@ -554,6 +557,216 @@ export function createTools(context: GilbertoToolContext = {}) {
                               overdue: project.invoice.dueDate < today,
                           }
                         : null,
+            };
+        },
+    }),
+    analizarRequisitosProyecto: tool({
+        description:
+            "Analiza requisitos funcionales/no funcionales de un proyecto usando requisitos existentes y notas recientes. Sirve para detectar faltantes, duplicados, ambiguedades y proximos requisitos a crear. No escribe datos.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+        }),
+        execute: async ({ projectId, projectName }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const project = await prisma.project.findUnique({
+                where: { id: resolved.project.id },
+                select: {
+                    id: true,
+                    name: true,
+                    status: true,
+                    client: { select: { name: true } },
+                    requirements: {
+                        orderBy: [{ completed: "asc" }, { priority: "desc" }, { createdAt: "asc" }],
+                        select: {
+                            id: true,
+                            description: true,
+                            category: true,
+                            priority: true,
+                            completed: true,
+                            updatedAt: true,
+                        },
+                    },
+                    notes: {
+                        orderBy: { updatedAt: "desc" },
+                        take: 12,
+                        select: {
+                            title: true,
+                            content: true,
+                            updatedAt: true,
+                        },
+                    },
+                },
+            });
+
+            if (!project) return { error: "No encontre el proyecto." };
+
+            return {
+                project: {
+                    id: project.id,
+                    name: project.name,
+                    status: project.status,
+                    client: project.client,
+                },
+                requirements: project.requirements.map((requirement) => ({
+                    ...requirement,
+                    updatedAt: requirement.updatedAt.toISOString(),
+                })),
+                recentNotes: project.notes.map((note) => ({
+                    ...note,
+                    updatedAt: note.updatedAt.toISOString(),
+                })),
+                instruction:
+                    "En la respuesta, separa hallazgos en funcionales y no funcionales. Si propones cambios, pide confirmacion antes de crear o modificar requisitos.",
+            };
+        },
+    }),
+    crearRequisitoProyecto: tool({
+        description:
+            "Crea un requisito funcional o no funcional dentro de un proyecto. Requiere confirmacion explicita antes de escribir.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+            description: z.string().min(1).max(500).describe("Descripcion clara del requisito."),
+            category: requirementCategorySchema.default("Funcional").describe("Tipo de requisito."),
+            priority: requirementPrioritySchema.default("Media").describe("Prioridad del requisito."),
+            confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
+        }),
+        execute: async ({ projectId, projectName, description, category, priority, confirmado }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            if (!confirmado) {
+                return confirmationRequired("crearRequisitoProyecto", {
+                    projectId: resolved.project.id,
+                    projectName: resolved.project.name,
+                    clientName: resolved.project.client.name,
+                    description,
+                    category,
+                    priority,
+                });
+            }
+
+            const requirement = await prisma.projectRequirement.create({
+                data: {
+                    projectId: resolved.project.id,
+                    description,
+                    category,
+                    priority,
+                },
+                select: {
+                    id: true,
+                    projectId: true,
+                    description: true,
+                    category: true,
+                    priority: true,
+                    completed: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+
+            invalidateCache(`project:${resolved.project.id}`);
+
+            return {
+                project: resolved.project,
+                requirement: {
+                    ...requirement,
+                    createdAt: requirement.createdAt.toISOString(),
+                    updatedAt: requirement.updatedAt.toISOString(),
+                },
+            };
+        },
+    }),
+    actualizarRequisitoProyecto: tool({
+        description:
+            "Modifica descripcion, categoria, prioridad o estado de completado de un requisito de proyecto. Requiere confirmacion explicita antes de escribir.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay proyecto actual."),
+            projectName: z.string().default("").describe("Nombre del proyecto si no hay ID o contexto."),
+            requirementId: z.string().min(1).describe("ID del requisito a modificar."),
+            description: z.string().min(1).max(500).optional().describe("Nueva descripcion, si corresponde."),
+            category: requirementCategorySchema.optional().describe("Nueva categoria, si corresponde."),
+            priority: requirementPrioritySchema.optional().describe("Nueva prioridad, si corresponde."),
+            completed: z.boolean().optional().describe("Nuevo estado de completado, si corresponde."),
+            confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
+        }),
+        execute: async ({ projectId, projectName, requirementId, description, category, priority, completed, confirmado }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+
+            if (!resolved.project) return resolved;
+
+            const current = await prisma.projectRequirement.findFirst({
+                where: {
+                    id: requirementId,
+                    projectId: resolved.project.id,
+                },
+                select: {
+                    id: true,
+                    description: true,
+                    category: true,
+                    priority: true,
+                    completed: true,
+                },
+            });
+
+            if (!current) return { error: "No encontre ese requisito dentro del proyecto indicado." };
+
+            const next = {
+                description: description ?? current.description,
+                category: category ?? current.category,
+                priority: priority ?? current.priority,
+                completed: completed ?? current.completed,
+            };
+
+            if (!confirmado) {
+                return confirmationRequired("actualizarRequisitoProyecto", {
+                    projectId: resolved.project.id,
+                    projectName: resolved.project.name,
+                    requirementId,
+                    before: current,
+                    after: next,
+                });
+            }
+
+            const requirement = await prisma.projectRequirement.update({
+                where: { id: requirementId },
+                data: next,
+                select: {
+                    id: true,
+                    projectId: true,
+                    description: true,
+                    category: true,
+                    priority: true,
+                    completed: true,
+                    updatedAt: true,
+                },
+            });
+
+            invalidateCache(`project:${resolved.project.id}`);
+
+            return {
+                project: resolved.project,
+                requirement: {
+                    ...requirement,
+                    updatedAt: requirement.updatedAt.toISOString(),
+                },
             };
         },
     }),

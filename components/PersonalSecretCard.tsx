@@ -14,14 +14,6 @@ type PersonalSecretCardProps = {
   };
 };
 
-async function tryReauth() {
-  try {
-    await ensureRecentWebAuthn();
-  } catch {
-    // Reauth is best-effort until the mobile WebAuthn flow is stable.
-  }
-}
-
 export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) {
   const [value, setValue] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -39,7 +31,7 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
     startTransition(async () => {
       try {
         setError("");
-        await tryReauth();
+        await ensureRecentWebAuthn();
         const revealed = await revealPersonalSecret(secret.id);
         setValue(revealed);
       } catch (caughtError) {
@@ -51,7 +43,7 @@ export default function PersonalSecretCard({ secret }: PersonalSecretCardProps) 
   async function copySecret() {
     try {
       setError("");
-      await tryReauth();
+      await ensureRecentWebAuthn();
       const secretValue = value ?? (await revealPersonalSecret(secret.id));
 
       await navigator.clipboard.writeText(secretValue);

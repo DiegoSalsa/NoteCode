@@ -15,14 +15,6 @@ type CredentialCardProps = {
 
 const MASKED_SECRET = "\u2022".repeat(12);
 
-async function tryReauth() {
-  try {
-    await ensureRecentWebAuthn();
-  } catch {
-    // Reauth is best-effort until the mobile WebAuthn flow is stable.
-  }
-}
-
 export function CredentialCard({ credential }: CredentialCardProps) {
   const [secret, setSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -40,7 +32,7 @@ export function CredentialCard({ credential }: CredentialCardProps) {
     setError(null);
     startTransition(async () => {
       try {
-        await tryReauth();
+        await ensureRecentWebAuthn();
         const revealedSecret = await revealCredential(credential.id);
         setSecret(revealedSecret);
       } catch (caughtError) {
@@ -52,7 +44,7 @@ export function CredentialCard({ credential }: CredentialCardProps) {
   async function handleCopy() {
     try {
       setError(null);
-      await tryReauth();
+      await ensureRecentWebAuthn();
       const valueToCopy = secret ?? (await revealCredential(credential.id));
 
       await navigator.clipboard.writeText(valueToCopy);

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
 
 async function requireUser() {
   const user = await getCurrentUser();
@@ -84,6 +84,9 @@ export async function savePersonalSecret(formData: FormData) {
 
 export async function revealPersonalSecret(secretId: string) {
   const user = await requireUser();
+  if (!(await hasRecentWebAuthn(user.id))) {
+    throw new Error("Necesitas confirmar tu identidad para revelar claves personales.");
+  }
 
   const secret = await prisma.personalSecret.findFirst({
     where: {

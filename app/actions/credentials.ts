@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
 
 type SaveCredentialInput = {
   projectId?: string;
@@ -40,6 +40,9 @@ export async function revealCredential(credentialId: string) {
   const user = await getCurrentUser();
 
   if (!user) throw new Error("Unauthorized.");
+  if (!(await hasRecentWebAuthn(user.id))) {
+    throw new Error("Necesitas confirmar tu identidad para revelar credenciales.");
+  }
 
   if (!credentialId) {
     throw new Error("credentialId is required.");

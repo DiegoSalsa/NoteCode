@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached, invalidateCache } from "@/lib/server-cache";
+import { uploadDocumentFile } from "@/lib/storage";
 
 const DEFAULT_TAKE = 50;
 const MAX_TAKE = 100;
@@ -81,13 +82,20 @@ export async function POST(request: NextRequest) {
     }
 
     const bytes = Buffer.from(await file.arrayBuffer());
+    const storedFile = await uploadDocumentFile({
+      bytes,
+      contentType: file.type || "application/octet-stream",
+      fileName: customName || file.name,
+    });
     const document = await prisma.document.create({
       data: {
         name: customName || file.name,
         category,
         mimeType: file.type || "application/octet-stream",
         size: file.size,
-        fileData: bytes,
+        fileData: storedFile ? null : bytes,
+        storagePath: storedFile?.path ?? null,
+        storageBucket: storedFile?.bucket ?? null,
       },
       select: {
         id: true,
