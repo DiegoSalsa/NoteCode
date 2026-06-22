@@ -27,8 +27,17 @@ type InvoicesPayload = {
     total: number;
     summary: {
         totalAmount: number;
+        netAmount?: number;
+        vatAmount?: number;
         pendingAmount: number;
         paidAmount: number;
+        overdueAmount?: number;
+        canceledAmount?: number;
+        collectibleAmount?: number;
+        collectionRate?: number;
+        overdueCount?: number;
+        byStatus?: { status: string; amount: number; count: number }[];
+        upcomingDue?: Pick<Invoice, "id" | "number" | "client" | "amount" | "dueDate">[];
     };
 };
 
@@ -64,6 +73,7 @@ export default function FinanzasPage() {
     const [summary, setSummary] = useState(cached?.summary ?? { totalAmount: 0, pendingAmount: 0, paidAmount: 0 });
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
+    const [statusFilter, setStatusFilter] = useState("");
     const debouncedSearch = useDebounce(search);
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -73,8 +83,8 @@ export default function FinanzasPage() {
 
     const fetchInvoices = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
-            const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "30" });
-            const key = `invoices:${debouncedSearch}:${skip}:30`;
+            const params = new URLSearchParams({ q: debouncedSearch, status: statusFilter, skip: String(skip), take: "30" });
+            const key = `invoices:${debouncedSearch}:${statusFilter}:${skip}:30`;
             const data = await fetchAndCacheJson<InvoicesPayload>(key, `/api/invoices?${params.toString()}`);
             const items = asArray<Invoice>(data.items);
             setError(null);
@@ -89,7 +99,7 @@ export default function FinanzasPage() {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [debouncedSearch]);
+    }, [debouncedSearch, statusFilter]);
 
     useEffect(() => {
         setLoading(true);
@@ -157,10 +167,12 @@ export default function FinanzasPage() {
 
     const filtered = invoices;
     const totalAmount = summary.totalAmount;
-    const netAmount = totalAmount / 1.19;
-    const vatAmount = totalAmount - netAmount;
+    const netAmount = summary.netAmount ?? totalAmount / 1.19;
+    const vatAmount = summary.vatAmount ?? totalAmount - netAmount;
     const pendingAmount = summary.pendingAmount;
     const paidAmount = summary.paidAmount;
+    const overdueAmount = summary.overdueAmount ?? 0;
+    const collectionRate = summary.collectionRate ?? 0;
 
     if (loading) {
         return (
@@ -192,7 +204,7 @@ export default function FinanzasPage() {
                 </div>
 
                 {/* KPI Cards */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800">
@@ -229,19 +241,65 @@ export default function FinanzasPage() {
                             <span className="text-[12px] font-medium text-neutral-400">Cobrado</span>
                         </div>
                         <p className="text-2xl font-semibold tabular-nums text-neutral-100">${paidAmount.toLocaleString()}</p>
+                        <p className="mt-1 text-[11px] text-neutral-600">{Math.round(collectionRate * 100)}% recuperado</p>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10">
+                                <ArrowDownRight size={14} strokeWidth={1.5} className="text-red-400" />
+                            </div>
+                            <span className="text-[12px] font-medium text-neutral-400">Vencido</span>
+                        </div>
+                        <p className="text-2xl font-semibold tabular-nums text-neutral-100">${overdueAmount.toLocaleString()}</p>
+                        <p className="mt-1 text-[11px] text-neutral-600">{summary.overdueCount ?? 0} facturas</p>
                     </div>
                 </div>
 
                 {/* Search */}
-                <div className="relative">
-                    <Search size={15} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-                    <input
-                        type="text"
-                        placeholder="Buscar facturas..."
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full rounded-lg border border-white/10 bg-neutral-900 pl-10 pr-4 py-2.5 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20 transition-colors"
-                    />
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="relative">
+                        <Search size={15} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                        <input
+                            type="text"
+                            placeholder="Buscar facturas..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-neutral-900 pl-10 pr-4 py-2.5 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20 transition-colors"
+                        />
+                    </div>
+                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2.5 text-[14px] text-neutral-100 outline-none focus:border-white/20">
+                        <option value="">Todos los estados</option>
+                        {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-2">
+                    <section className="rounded-lg border border-white/10 bg-neutral-900 p-4">
+                        <h2 className="mb-3 text-[14px] font-semibold text-neutral-100">Distribucion por estado</h2>
+                        <div className="space-y-2">
+                            {(summary.byStatus ?? []).map((item) => (
+                                <div key={item.status} className="flex items-center justify-between gap-3 text-[13px]">
+                                    <StatusBadge status={item.status} />
+                                    <span className="text-neutral-500">{item.count} / ${item.amount.toLocaleString()}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                    <section className="rounded-lg border border-white/10 bg-neutral-900 p-4">
+                        <h2 className="mb-3 text-[14px] font-semibold text-neutral-100">Proximos vencimientos</h2>
+                        <div className="space-y-2">
+                            {(summary.upcomingDue ?? []).map((invoice) => (
+                                <div key={invoice.id} className="flex items-center justify-between gap-3 text-[13px]">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-neutral-200">{invoice.number} / {invoice.client}</p>
+                                        <p className="text-[11px] text-neutral-600">{new Date(invoice.dueDate).toLocaleDateString("es-CL")}</p>
+                                    </div>
+                                    <span className="shrink-0 tabular-nums text-neutral-400">${invoice.amount.toLocaleString()}</span>
+                                </div>
+                            ))}
+                            {(summary.upcomingDue ?? []).length === 0 && <p className="text-[13px] text-neutral-600">Sin vencimientos proximos.</p>}
+                        </div>
+                    </section>
                 </div>
             </section>
 

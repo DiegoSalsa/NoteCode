@@ -46,6 +46,7 @@ Before deploying document storage changes, run this SQL once in the Supabase SQL
 
 ```text
 prisma/migrations-manual/20260622_documents_storage.sql
+prisma/migrations-manual/20260622_project_tasks_timeline.sql
 ```
 
 Existing documents stored in Postgres continue to download through the `file_data` fallback. New uploads use Storage when these variables are configured.

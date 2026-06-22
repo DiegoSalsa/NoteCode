@@ -9,18 +9,21 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const q = searchParams.get("q")?.trim() || "";
+        const status = searchParams.get("status")?.trim() || "";
         const skip = Math.max(0, Number(searchParams.get("skip") ?? "0") || 0);
         const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
-        const where = q
-            ? {
+        const where = {
+            ...(status ? { status } : {}),
+            ...(q ? {
                 OR: [
                     { number: { contains: q, mode: "insensitive" as const } },
                     { client: { contains: q, mode: "insensitive" as const } },
                 ],
-            }
-            : {};
-        const invoices = await cached(`invoices:${q}:${skip}:${take}`, 30_000, async () => {
-            const [items, total, summary] = await Promise.all([
+            } : {}),
+        };
+        const invoices = await cached(`invoices:${q}:${status}:${skip}:${take}`, 30_000, async () => {
+            const today = new Date();
+            const [items, total, summary, overduePending, upcomingDue] = await Promise.all([
                 prisma.invoice.findMany({
                     where,
                     orderBy: { createdAt: "desc" },
@@ -46,11 +49,39 @@ export async function GET(request: NextRequest) {
                     _sum: { amount: true },
                     _count: { id: true },
                 }),
+                prisma.invoice.aggregate({
+                    where: {
+                        ...where,
+                        status: "Pendiente",
+                        dueDate: { lt: today },
+                    },
+                    _sum: { amount: true },
+                    _count: true,
+                }),
+                prisma.invoice.findMany({
+                    where: {
+                        ...where,
+                        status: "Pendiente",
+                        dueDate: { gte: today },
+                    },
+                    orderBy: { dueDate: "asc" },
+                    take: 5,
+                    select: {
+                        id: true,
+                        number: true,
+                        client: true,
+                        amount: true,
+                        dueDate: true,
+                    },
+                }),
             ]);
 
             const totalAmount = summary.reduce((sum, item) => sum + (item._sum.amount ?? 0), 0);
             const pendingAmount = summary.find((item) => item.status === "Pendiente")?._sum.amount ?? 0;
             const paidAmount = summary.find((item) => item.status === "Pagado")?._sum.amount ?? 0;
+            const canceledAmount = summary.find((item) => item.status === "Cancelado")?._sum.amount ?? 0;
+            const overdueAmount = (summary.find((item) => item.status === "Vencido")?._sum.amount ?? 0) + (overduePending._sum.amount ?? 0);
+            const collectibleAmount = totalAmount - canceledAmount;
 
             return {
                 items,
@@ -59,8 +90,21 @@ export async function GET(request: NextRequest) {
                 total,
                 summary: {
                     totalAmount,
+                    netAmount: totalAmount / 1.19,
+                    vatAmount: totalAmount - totalAmount / 1.19,
                     pendingAmount,
                     paidAmount,
+                    overdueAmount,
+                    canceledAmount,
+                    collectibleAmount,
+                    collectionRate: collectibleAmount > 0 ? paidAmount / collectibleAmount : 0,
+                    overdueCount: (summary.find((item) => item.status === "Vencido")?._count.id ?? 0) + overduePending._count,
+                    byStatus: summary.map((item) => ({
+                        status: item.status,
+                        amount: item._sum.amount ?? 0,
+                        count: item._count.id,
+                    })),
+                    upcomingDue,
                 },
             };
         });

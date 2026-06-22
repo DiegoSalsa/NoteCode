@@ -18,6 +18,7 @@ export async function GET(
                     client: { select: { id: true, name: true } },
                     statusLogs: { orderBy: { createdAt: "desc" } },
                     requirements: { orderBy: { createdAt: "desc" } },
+                    tasks: { orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }] },
                     techs: { orderBy: { createdAt: "asc" } },
                     vaultCredentials: {
                         orderBy: { createdAt: "desc" },
@@ -30,17 +31,78 @@ export async function GET(
                         },
                     },
                     notes: { orderBy: { updatedAt: "desc" } },
+                    documents: {
+                        orderBy: { updatedAt: "desc" },
+                        select: { id: true, name: true, category: true, size: true, updatedAt: true, createdAt: true },
+                    },
+                    invoice: {
+                        select: { id: true, number: true, amount: true, status: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true },
+                    },
                 },
             });
 
             if (!project) return null;
 
-            const { statusLogs, requirements, techs, vaultCredentials, notes } = project;
+            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoice } = project;
+            const timeline = [
+                ...statusLogs.map((log) => ({
+                    id: `status:${log.id}`,
+                    type: "status",
+                    title: `Estado actualizado a ${log.status}`,
+                    description: log.note,
+                    at: log.createdAt,
+                })),
+                ...notes.map((note) => ({
+                    id: `note:${note.id}`,
+                    type: "note",
+                    title: `Nota: ${note.title}`,
+                    description: note.content || null,
+                    at: note.updatedAt,
+                })),
+                ...requirements.map((requirement) => ({
+                    id: `requirement:${requirement.id}`,
+                    type: "requirement",
+                    title: `Requisito ${requirement.completed ? "completado" : "registrado"}`,
+                    description: requirement.description,
+                    at: requirement.updatedAt,
+                })),
+                ...tasks.map((task) => ({
+                    id: `task:${task.id}`,
+                    type: "task",
+                    title: `Tarea ${task.status}: ${task.title}`,
+                    description: task.description,
+                    at: task.updatedAt,
+                })),
+                ...vaultCredentials.map((credential) => ({
+                    id: `credential:${credential.id}`,
+                    type: "credential",
+                    title: `Credencial agregada: ${credential.name}`,
+                    description: credential.username,
+                    at: credential.createdAt,
+                })),
+                ...documents.map((document) => ({
+                    id: `document:${document.id}`,
+                    type: "document",
+                    title: `Documento agregado: ${document.name}`,
+                    description: document.category,
+                    at: document.createdAt,
+                })),
+                ...(invoice
+                    ? [{
+                        id: `invoice:${invoice.id}`,
+                        type: "invoice",
+                        title: `Factura ${invoice.number}: ${invoice.status}`,
+                        description: `$${invoice.amount.toLocaleString("es-CL")} / vence ${invoice.dueDate.toISOString().slice(0, 10)}`,
+                        at: invoice.updatedAt,
+                    }]
+                    : []),
+            ].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 80);
 
             return {
                 project,
                 statusLogs,
                 requirements,
+                tasks,
                 techs,
                 credentials: vaultCredentials.map((credential) => ({
                     ...credential,
@@ -51,6 +113,9 @@ export async function GET(
                     notes: null,
                 })),
                 notes,
+                documents,
+                invoice,
+                timeline: timeline.map((item) => ({ ...item, at: item.at.toISOString() })),
             };
         });
 
@@ -113,9 +178,11 @@ export async function DELETE(
             prisma.credential.deleteMany({ where: { projectId: id } }),
             prisma.projectCredential.deleteMany({ where: { projectId: id } }),
             prisma.projectNote.deleteMany({ where: { projectId: id } }),
+            prisma.projectTask.deleteMany({ where: { projectId: id } }),
             prisma.projectTech.deleteMany({ where: { projectId: id } }),
             prisma.projectRequirement.deleteMany({ where: { projectId: id } }),
             prisma.projectStatusLog.deleteMany({ where: { projectId: id } }),
+            prisma.document.updateMany({ where: { projectId: id }, data: { projectId: null } }),
             prisma.project.delete({ where: { id } }),
         ]);
         invalidateCache(`project:${id}`);
