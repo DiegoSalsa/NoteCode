@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { deleteDocumentFile, downloadDocumentFile } from "@/lib/storage";
+import { attachmentContentDisposition, documentFileName } from "@/lib/document-files";
 
 export async function GET(
   _request: NextRequest,
@@ -35,10 +36,14 @@ export async function GET(
       return NextResponse.json({ error: "Document file not found" }, { status: 404 });
     }
 
+    const fileName = documentFileName(document.name, document.mimeType);
+
     return new Response(fileBytes, {
       headers: {
         "Content-Type": document.mimeType,
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(document.name)}"`,
+        "Content-Disposition": attachmentContentDisposition(fileName),
+        "Content-Length": String(fileBytes.byteLength),
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=60",
       },
     });
