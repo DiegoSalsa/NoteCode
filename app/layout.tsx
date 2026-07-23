@@ -63,6 +63,7 @@ export default async function RootLayout({
                             ? {
                                 displayName: user.name,
                                 email: user.email,
+                                role: user.role,
                             }
                             : null
                     }

@@ -5,6 +5,7 @@ import { invalidateCache } from "@/lib/server-cache";
 export async function GET() {
     try {
         const clients = await prisma.client.findMany({
+            where: { deletedAt: null },
             orderBy: { createdAt: "desc" },
             include: { _count: { select: { projects: true } } },
         });

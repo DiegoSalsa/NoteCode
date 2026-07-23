@@ -49,7 +49,7 @@ export async function revealCredential(credentialId: string) {
   }
 
   const credential = await prisma.credential.findUnique({
-    where: { id: credentialId },
+    where: { id: credentialId, deletedAt: null },
     select: { id: true, secretData: true },
   });
 

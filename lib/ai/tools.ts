@@ -33,6 +33,7 @@ export type GilbertoToolContext = {
     pathname?: string;
     currentProjectId?: string | null;
     userId?: string | null;
+    role?: string | null;
 };
 
 async function resolveProjectForTool(input: {
@@ -42,7 +43,7 @@ async function resolveProjectForTool(input: {
 }) {
     if (input.projectId || input.contextProjectId) {
         const project = await prisma.project.findUnique({
-            where: { id: input.projectId || input.contextProjectId || "" },
+            where: { id: input.projectId || input.contextProjectId || "", deletedAt: null },
             select: { id: true, name: true, status: true, client: { select: { name: true } } },
         });
         if (project) return { project };
@@ -57,6 +58,7 @@ async function resolveProjectForTool(input: {
 
     const matches = await prisma.project.findMany({
         where: {
+            deletedAt: null,
             name: { contains: projectName, mode: "insensitive" },
         },
         orderBy: { updatedAt: "desc" },
@@ -76,6 +78,7 @@ async function resolveProjectForTool(input: {
 }
 
 export function createTools(context: GilbertoToolContext = {}) {
+    const canUseFinance = ["ADMIN", "MANAGER", "FINANCE"].includes(context.role ?? "");
     return {
     getProyectos: tool({
         description:
@@ -84,12 +87,13 @@ export function createTools(context: GilbertoToolContext = {}) {
             estado: z.enum(["todos", "activos", "finalizados"]).default("todos").describe("Filtro de proyectos a consultar."),
         }),
         execute: async ({ estado }) => {
-            const where =
+            const statusWhere =
                 estado === "activos"
                     ? { status: { not: "Completado" } }
                     : estado === "finalizados"
                       ? { status: "Completado" }
                       : {};
+            const where = { deletedAt: null, ...statusWhere };
 
             const projects = await prisma.project.findMany({
                 where,
@@ -127,15 +131,19 @@ export function createTools(context: GilbertoToolContext = {}) {
             "Resume las finanzas operativas de PuroCode usando facturas: total facturado, neto sin IVA, cobrado, pendiente y vencido.",
         inputSchema: z.object({}),
         execute: async () => {
+            if (!canUseFinance) return { error: "No tienes permiso para consultar finanzas." };
             const [total, paid, pending, overdue] = await Promise.all([
                 prisma.invoice.aggregate({
+                    where: { deletedAt: null },
                     _sum: {
                         amount: true,
+                        netAmount: true,
                     },
                     _count: true,
                 }),
                 prisma.invoice.aggregate({
                     where: {
+                        deletedAt: null,
                         status: "Pagado",
                     },
                     _sum: {
@@ -145,6 +153,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 }),
                 prisma.invoice.aggregate({
                     where: {
+                        deletedAt: null,
                         status: "Pendiente",
                     },
                     _sum: {
@@ -154,6 +163,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 }),
                 prisma.invoice.aggregate({
                     where: {
+                        deletedAt: null,
                         status: "Vencido",
                     },
                     _sum: {
@@ -167,7 +177,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             const paidAmount = paid._sum.amount ?? 0;
             const pendingAmount = pending._sum.amount ?? 0;
             const overdueAmount = overdue._sum.amount ?? 0;
-            const netAmount = totalAmount / 1.19;
+            const netAmount = total._sum.netAmount ?? totalAmount / 1.19;
 
             return {
                 totalAmount,
@@ -194,15 +204,18 @@ export function createTools(context: GilbertoToolContext = {}) {
             "Entrega un resumen ejecutivo de proyectos, finanzas, facturas y notas recientes en pesos chilenos.",
         inputSchema: z.object({}),
         execute: async () => {
+            if (!canUseFinance) return { error: "No tienes permiso para consultar el resumen financiero." };
             const [activeProjects, completedProjects, invoices, recentNotes] = await Promise.all([
-                prisma.project.count({ where: { status: { not: "Completado" } } }),
-                prisma.project.count({ where: { status: "Completado" } }),
+                prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
+                prisma.project.count({ where: { deletedAt: null, status: "Completado" } }),
                 prisma.invoice.groupBy({
                     by: ["status"],
+                    where: { deletedAt: null },
                     _sum: { amount: true },
                     _count: { id: true },
                 }),
                 prisma.note.findMany({
+                    where: { deletedAt: null },
                     orderBy: { updatedAt: "desc" },
                     take: 5,
                     select: {
@@ -252,6 +265,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             const [overdueInvoices, staleProjects, notesWithTodos] = await Promise.all([
                 prisma.invoice.findMany({
                     where: {
+                        deletedAt: null,
                         OR: [
                             { status: "Vencido" },
                             {
@@ -273,6 +287,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 }),
                 prisma.project.findMany({
                     where: {
+                        deletedAt: null,
                         status: { not: "Completado" },
                         updatedAt: { lt: staleDate },
                     },
@@ -288,6 +303,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 }),
                 prisma.note.findMany({
                     where: {
+                        deletedAt: null,
                         OR: [
                             { title: { contains: "pendiente", mode: "insensitive" } },
                             { content: { contains: "pendiente", mode: "insensitive" } },
@@ -335,6 +351,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             const cleanFolder = folder.trim();
             const notes = await prisma.note.findMany({
                 where: {
+                    deletedAt: null,
                     ...(cleanFolder ? { folder: cleanFolder } : {}),
                     ...(q
                         ? {
@@ -454,7 +471,9 @@ export function createTools(context: GilbertoToolContext = {}) {
                         take: 8,
                         select: { id: true, title: true, content: true, updatedAt: true },
                     },
-                    invoice: {
+                    invoices: {
+                        orderBy: { createdAt: "desc" },
+                        take: 10,
                         select: { number: true, amount: true, status: true, dueDate: true, paidAt: true },
                     },
                     statusLogs: {
@@ -466,6 +485,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             });
 
             if (!project) return { error: "No encontre el proyecto." };
+            const invoice = project.invoices[0] ?? null;
 
             return {
                 ...project,
@@ -473,14 +493,20 @@ export function createTools(context: GilbertoToolContext = {}) {
                 createdAt: project.createdAt.toISOString(),
                 updatedAt: project.updatedAt.toISOString(),
                 notes: project.notes.map((note) => ({ ...note, updatedAt: note.updatedAt.toISOString() })),
-                invoice: project.invoice
+                invoice: invoice
                     ? {
-                          ...project.invoice,
-                          amountClp: formatClp(project.invoice.amount),
-                          dueDate: project.invoice.dueDate.toISOString(),
-                          paidAt: project.invoice.paidAt?.toISOString() ?? null,
+                          ...invoice,
+                          amountClp: formatClp(invoice.amount),
+                          dueDate: invoice.dueDate.toISOString(),
+                          paidAt: invoice.paidAt?.toISOString() ?? null,
                       }
                     : null,
+                invoices: project.invoices.map((item) => ({
+                    ...item,
+                    amountClp: formatClp(item.amount),
+                    dueDate: item.dueDate.toISOString(),
+                    paidAt: item.paidAt?.toISOString() ?? null,
+                })),
                 statusLogs: project.statusLogs.map((log) => ({ ...log, createdAt: log.createdAt.toISOString() })),
             };
         },
@@ -530,13 +556,16 @@ export function createTools(context: GilbertoToolContext = {}) {
                         take: 10,
                         select: { title: true, content: true, updatedAt: true },
                     },
-                    invoice: {
+                    invoices: {
+                        orderBy: { createdAt: "desc" },
+                        take: 10,
                         select: { number: true, amount: true, status: true, dueDate: true },
                     },
                 },
             });
 
             if (!project) return { error: "No encontre el proyecto." };
+            const pendingInvoice = project.invoices.find((item) => item.status !== "Pagado") ?? null;
 
             return {
                 project: {
@@ -549,12 +578,12 @@ export function createTools(context: GilbertoToolContext = {}) {
                 incompleteRequirements: project.requirements,
                 notesWithPossibleTodos: project.notes.map((note) => ({ ...note, updatedAt: note.updatedAt.toISOString() })),
                 invoiceAlert:
-                    project.invoice && project.invoice.status !== "Pagado"
+                    pendingInvoice
                         ? {
-                              ...project.invoice,
-                              amountClp: formatClp(project.invoice.amount),
-                              dueDate: project.invoice.dueDate.toISOString(),
-                              overdue: project.invoice.dueDate < today,
+                              ...pendingInvoice,
+                              amountClp: formatClp(pendingInvoice.amount),
+                              dueDate: pendingInvoice.dueDate.toISOString(),
+                              overdue: pendingInvoice.dueDate < today,
                           }
                         : null,
             };
@@ -804,11 +833,16 @@ export function createTools(context: GilbertoToolContext = {}) {
                         take: 5,
                         select: { title: true, content: true },
                     },
-                    invoice: { select: { number: true, amount: true, status: true, dueDate: true } },
+                    invoices: {
+                        orderBy: { createdAt: "desc" },
+                        take: 10,
+                        select: { number: true, amount: true, status: true, dueDate: true },
+                    },
                 },
             });
 
             if (!project) return { error: "No encontre el proyecto." };
+            const invoice = project.invoices[0] ?? null;
 
             return {
                 objetivo,
@@ -821,11 +855,11 @@ export function createTools(context: GilbertoToolContext = {}) {
                     updatedAt: project.updatedAt.toISOString(),
                     pendingRequirements: project.requirements,
                     recentNotes: project.notes,
-                    invoice: project.invoice
+                    invoice: invoice
                         ? {
-                              ...project.invoice,
-                              amountClp: formatClp(project.invoice.amount),
-                              dueDate: project.invoice.dueDate.toISOString(),
+                              ...invoice,
+                              amountClp: formatClp(invoice.amount),
+                              dueDate: invoice.dueDate.toISOString(),
                           }
                         : null,
                 },
@@ -1227,6 +1261,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
         }),
         execute: async ({ number, client, amount, status, dueDate, confirmado }) => {
+            if (!canUseFinance) return { error: "No tienes permiso para crear facturas." };
             if (!confirmado) {
                 return confirmationRequired("crearFactura", {
                     number,
@@ -1272,6 +1307,216 @@ export function createTools(context: GilbertoToolContext = {}) {
                 paidAt: invoice.paidAt?.toISOString() ?? null,
                 createdAt: invoice.createdAt.toISOString(),
             };
+        },
+    }),
+    getCRM: tool({
+        description: "Resume el pipeline comercial, oportunidades, valor ponderado y proximas acciones.",
+        inputSchema: z.object({}),
+        execute: async () => {
+            const opportunities = await prisma.opportunity.findMany({
+                where: { deletedAt: null },
+                orderBy: [{ expectedClose: "asc" }, { updatedAt: "desc" }],
+                take: 50,
+                include: { client: { select: { name: true } } },
+            });
+            return {
+                count: opportunities.length,
+                totalValue: opportunities.reduce((sum, item) => sum + item.value, 0),
+                weightedValue: opportunities.reduce((sum, item) => sum + item.value * item.probability / 100, 0),
+                byStage: Object.entries(opportunities.reduce<Record<string, { count: number; value: number }>>((result, item) => {
+                    const current = result[item.stage] ?? { count: 0, value: 0 };
+                    result[item.stage] = { count: current.count + 1, value: current.value + item.value };
+                    return result;
+                }, {})).map(([stage, summary]) => ({ stage, ...summary, valueClp: formatClp(summary.value) })),
+                opportunities: opportunities.map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    client: item.client?.name ?? item.company,
+                    stage: item.stage,
+                    value: item.value,
+                    valueClp: formatClp(item.value),
+                    probability: item.probability,
+                    nextAction: item.nextAction,
+                    expectedClose: item.expectedClose?.toISOString() ?? null,
+                })),
+            };
+        },
+    }),
+    getRentabilidad: tool({
+        description: "Calcula rentabilidad por proyecto usando horas, costos del equipo, gastos, facturas y pagos.",
+        inputSchema: z.object({
+            projectName: z.string().default("").describe("Proyecto opcional. Si se omite, analiza todos."),
+        }),
+        execute: async ({ projectName }) => {
+            if (!canUseFinance) return { error: "No tienes permiso para consultar rentabilidad." };
+            const projects = await prisma.project.findMany({
+                where: {
+                    deletedAt: null,
+                    ...(projectName.trim() ? { name: { contains: projectName.trim(), mode: "insensitive" } } : {}),
+                },
+                include: {
+                    client: { select: { name: true } },
+                    timeEntries: { include: { teamMember: { select: { hourlyCost: true } } } },
+                    expenses: { where: { deletedAt: null } },
+                    invoices: { where: { deletedAt: null }, include: { payments: true } },
+                },
+                take: 30,
+            });
+            return projects.map((project) => {
+                const hours = project.timeEntries.reduce((sum, item) => sum + item.hours, 0);
+                const laborCost = project.timeEntries.reduce((sum, item) => sum + item.hours * item.teamMember.hourlyCost, 0);
+                const expenseCost = project.expenses.reduce((sum, item) => sum + item.amount, 0);
+                const invoiced = project.invoices.reduce((sum, item) => sum + item.amount, 0);
+                const collected = project.invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0), 0);
+                const revenue = invoiced || project.agreedAmount;
+                const cost = laborCost + expenseCost;
+                return {
+                    id: project.id,
+                    project: project.name,
+                    client: project.client.name,
+                    hours,
+                    revenue,
+                    revenueClp: formatClp(revenue),
+                    cost,
+                    costClp: formatClp(cost),
+                    collected,
+                    collectedClp: formatClp(collected),
+                    margin: revenue - cost,
+                    marginClp: formatClp(revenue - cost),
+                    marginPercent: revenue ? Math.round((revenue - cost) / revenue * 1000) / 10 : 0,
+                };
+            });
+        },
+    }),
+    getCapacidadEquipo: tool({
+        description: "Muestra capacidad y utilizacion semanal del equipo.",
+        inputSchema: z.object({}),
+        execute: async () => {
+            const since = new Date(Date.now() - 7 * 86400000);
+            const members = await prisma.teamMember.findMany({
+                where: { deletedAt: null, active: true },
+                include: { timeEntries: { where: { date: { gte: since } }, select: { hours: true, billable: true } }, assignments: { include: { project: { select: { name: true } } } } },
+            });
+            return members.map((member) => {
+                const used = member.timeEntries.reduce((sum, item) => sum + item.hours, 0);
+                return {
+                    id: member.id,
+                    name: member.name,
+                    role: member.role,
+                    capacityHours: member.weeklyCapacity,
+                    usedHours: used,
+                    availableHours: member.weeklyCapacity - used,
+                    utilizationPercent: member.weeklyCapacity ? Math.round(used / member.weeklyCapacity * 100) : 0,
+                    projects: member.assignments.map((assignment) => assignment.project.name),
+                };
+            });
+        },
+    }),
+    getSoporte: tool({
+        description: "Resume tickets abiertos, prioridades y cumplimiento de SLA.",
+        inputSchema: z.object({}),
+        execute: async () => {
+            const now = new Date();
+            const tickets = await prisma.supportTicket.findMany({
+                where: { deletedAt: null, status: { notIn: ["Resuelto", "Cerrado"] } },
+                orderBy: [{ priority: "asc" }, { resolutionDue: "asc" }],
+                include: { client: { select: { name: true } }, project: { select: { name: true } } },
+                take: 50,
+            });
+            return {
+                open: tickets.length,
+                breached: tickets.filter((item) => item.resolutionDue && item.resolutionDue < now).length,
+                tickets: tickets.map((item) => ({
+                    id: item.id,
+                    number: item.number,
+                    subject: item.subject,
+                    client: item.client.name,
+                    project: item.project?.name ?? null,
+                    status: item.status,
+                    priority: item.priority,
+                    assignee: item.assignee,
+                    responseDue: item.responseDue?.toISOString() ?? null,
+                    resolutionDue: item.resolutionDue?.toISOString() ?? null,
+                    slaBreached: Boolean(item.resolutionDue && item.resolutionDue < now),
+                })),
+            };
+        },
+    }),
+    crearOportunidad: tool({
+        description: "Crea una oportunidad comercial en CRM. Requiere confirmacion explicita.",
+        inputSchema: z.object({
+            name: z.string().min(1).max(160),
+            company: z.string().max(160).default(""),
+            contactName: z.string().max(160).default(""),
+            email: z.string().max(200).default(""),
+            value: z.number().nonnegative().default(0),
+            source: z.string().max(80).default("Directo"),
+            nextAction: z.string().max(300).default(""),
+            confirmado: z.boolean().default(false),
+        }),
+        execute: async ({ name, company, contactName, email, value, source, nextAction, confirmado }) => {
+            if (!confirmado) return confirmationRequired("crearOportunidad", { name, company, contactName, email, valueClp: formatClp(value), source, nextAction });
+            const opportunity = await prisma.opportunity.create({
+                data: { name, company: company || null, contactName: contactName || null, email: email || null, value, source, nextAction: nextAction || null },
+            });
+            return { ...opportunity, valueClp: formatClp(opportunity.value) };
+        },
+    }),
+    registrarHoras: tool({
+        description: "Registra horas en un proyecto para una persona del equipo. Requiere confirmacion.",
+        inputSchema: z.object({
+            projectName: z.string().min(1),
+            memberName: z.string().min(1),
+            description: z.string().min(1).max(500),
+            hours: z.number().positive().max(24),
+            date: z.string().default(""),
+            billable: z.boolean().default(true),
+            confirmado: z.boolean().default(false),
+        }),
+        execute: async ({ projectName, memberName, description, hours, date, billable, confirmado }) => {
+            const [project, member] = await Promise.all([
+                prisma.project.findFirst({ where: { deletedAt: null, name: { contains: projectName, mode: "insensitive" } } }),
+                prisma.teamMember.findFirst({ where: { deletedAt: null, name: { contains: memberName, mode: "insensitive" } } }),
+            ]);
+            if (!project || !member) return { error: "No encontre el proyecto o la persona indicada." };
+            const entryDate = date ? new Date(date) : new Date();
+            if (Number.isNaN(entryDate.getTime())) return { error: "La fecha no es valida." };
+            if (!confirmado) return confirmationRequired("registrarHoras", { project: project.name, member: member.name, description, hours, date: entryDate.toISOString().slice(0, 10), billable });
+            const entry = await prisma.timeEntry.create({ data: { projectId: project.id, teamMemberId: member.id, description, hours, date: entryDate, billable } });
+            invalidateCache(`project:${project.id}`);
+            return { ...entry, date: entry.date.toISOString() };
+        },
+    }),
+    crearTicketSoporte: tool({
+        description: "Crea un ticket de soporte para un cliente o proyecto. Requiere confirmacion explicita.",
+        inputSchema: z.object({
+            clientName: z.string().min(1),
+            projectName: z.string().default(""),
+            subject: z.string().min(1).max(160),
+            description: z.string().min(1).max(3000),
+            priority: z.enum(["Baja", "Media", "Alta", "Critica"]).default("Media"),
+            confirmado: z.boolean().default(false),
+        }),
+        execute: async ({ clientName, projectName, subject, description, priority, confirmado }) => {
+            const client = await prisma.client.findFirst({ where: { deletedAt: null, name: { contains: clientName, mode: "insensitive" } } });
+            if (!client) return { error: "No encontre el cliente." };
+            const project = projectName ? await prisma.project.findFirst({ where: { clientId: client.id, deletedAt: null, name: { contains: projectName, mode: "insensitive" } } }) : null;
+            if (!confirmado) return confirmationRequired("crearTicketSoporte", { client: client.name, project: project?.name ?? null, subject, description, priority });
+            const count = await prisma.supportTicket.count();
+            const createdAt = new Date();
+            const ticket = await prisma.supportTicket.create({
+                data: {
+                    number: `TKT-${createdAt.getFullYear()}-${String(count + 1).padStart(4, "0")}`,
+                    clientId: client.id,
+                    projectId: project?.id ?? null,
+                    subject,
+                    description,
+                    priority: priority === "Critica" ? "Crítica" : priority,
+                    responseDue: new Date(createdAt.getTime() + 24 * 3600000),
+                    resolutionDue: new Date(createdAt.getTime() + 72 * 3600000),
+                },
+            });
+            return { ...ticket, createdAt: ticket.createdAt.toISOString(), responseDue: ticket.responseDue?.toISOString(), resolutionDue: ticket.resolutionDue?.toISOString() };
         },
     }),
     };

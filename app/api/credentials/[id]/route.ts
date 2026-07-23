@@ -50,8 +50,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const credential = await prisma.credential.delete({
+    const credential = await prisma.credential.update({
       where: { id },
+      data: { deletedAt: new Date() },
       select: { projectId: true },
     });
     if (credential.projectId) invalidateCache(`project:${credential.projectId}`);

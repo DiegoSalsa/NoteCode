@@ -86,11 +86,11 @@ function SkeletonLoader({ rows = 3 }: { rows?: number }) {
 async function SummaryCards() {
   const [projectCount, credentialCount, pendingInvoiceCount, pendingInvoiceTotal] =
     await Promise.all([
-      prisma.project.count(),
-      prisma.credential.count(),
-      prisma.invoice.count({ where: { status: "Pendiente" } }),
+      prisma.project.count({ where: { deletedAt: null } }),
+      prisma.credential.count({ where: { deletedAt: null } }),
+      prisma.invoice.count({ where: { deletedAt: null, status: "Pendiente" } }),
       prisma.invoice.aggregate({
-        where: { status: "Pendiente" },
+        where: { deletedAt: null, status: "Pendiente" },
         _sum: { amount: true },
       }),
     ]);
@@ -151,6 +151,7 @@ async function SummaryCards() {
 
 async function RecentProjects() {
   const projects = await prisma.project.findMany({
+    where: { deletedAt: null },
     orderBy: { updatedAt: "desc" },
     take: 5,
     select: {

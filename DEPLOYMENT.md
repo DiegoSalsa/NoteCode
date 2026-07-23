@@ -50,3 +50,26 @@ prisma/migrations-manual/20260622_project_tasks_timeline.sql
 ```
 
 Existing documents stored in Postgres continue to download through the `file_data` fallback. New uploads use Storage when these variables are configured.
+
+## ERP migration
+
+The full ERP schema was applied on 2026-07-23. For a new environment, execute these scripts in order:
+
+```text
+prisma/migrations-manual/20260622_documents_storage.sql
+prisma/migrations-manual/20260622_project_tasks_timeline.sql
+prisma/migrations-manual/20260723_full_erp.sql
+prisma/migrations-manual/20260723_erp_defaults.sql
+```
+
+The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.
+
+## Daily automations
+
+`vercel.json` schedules `/api/automations/run` every day at 12:00 UTC. Configure a strong random value in Vercel:
+
+```text
+CRON_SECRET="<random-secret>"
+```
+
+Vercel sends it as a bearer token when invoking the cron route. Users can also run the same checks manually from **Actividad → Revisar ahora**.

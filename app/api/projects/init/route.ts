@@ -13,12 +13,13 @@ export async function GET(request: NextRequest) {
     const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
     const where = q
       ? {
+          deletedAt: null,
           OR: [
             { name: { contains: q, mode: "insensitive" as const } },
             { client: { name: { contains: q, mode: "insensitive" as const } } },
           ],
         }
-      : {};
+      : { deletedAt: null };
     const cacheKey = `projects:init:${q}:${skip}:${take}`;
     const data = await cached(cacheKey, 30_000, async () => {
       const [projects, clients, total] = await Promise.all([
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
           },
         }),
         prisma.client.findMany({
+          where: { deletedAt: null },
           orderBy: { createdAt: "desc" },
           select: { id: true, name: true },
         }),

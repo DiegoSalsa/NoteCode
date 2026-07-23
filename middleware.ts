@@ -7,7 +7,9 @@ const PUBLIC_PATHS = [
   "/sw.js",
   "/api/webauthn/login/options",
   "/api/webauthn/login/verify",
+  "/api/automations/run",
 ];
+const PUBLIC_PREFIXES = ["/portal/", "/api/portal/"];
 const SESSION_COOKIE_NAME = "notecode_session";
 
 let cachedSecret: string | undefined;
@@ -68,10 +70,11 @@ async function hasValidSession(request: NextRequest) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = await hasValidSession(request);
-  const isPublicPath = PUBLIC_PATHS.includes(pathname);
+  const isPublicPath = PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const isAuthEntry = pathname === "/" || pathname === "/establecer-clave";
   const isApiPath = pathname.startsWith("/api");
 
-  if (isPublicPath && hasSession) {
+  if (isAuthEntry && hasSession) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

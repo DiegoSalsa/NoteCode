@@ -12,7 +12,7 @@ export async function GET(
   try {
     const { id } = await params;
     const items = await prisma.credential.findMany({
-      where: { projectId: id },
+      where: { projectId: id, deletedAt: null },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,

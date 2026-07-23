@@ -30,7 +30,7 @@ export async function DELETE(
 ) {
     try {
         const { id } = await params;
-        await prisma.note.delete({ where: { id } });
+        await prisma.note.update({ where: { id }, data: { deletedAt: new Date() } });
         invalidateCache("notes");
         return NextResponse.json({ success: true });
     } catch (error) {

@@ -14,6 +14,7 @@ export type AuthUser = {
   email: string;
   name: string;
   passwordHash: string | null;
+  role: string;
 };
 
 function getSessionSecret() {
@@ -63,16 +64,19 @@ export async function findUserByEmail(email: string): Promise<AuthUser | null> {
       email: true,
       displayName: true,
       passwordHash: true,
+      role: true,
+      active: true,
     },
   });
 
-  if (!profile) return null;
+  if (!profile || !profile.active) return null;
 
   return {
     id: profile.userId,
     email: profile.email,
     name: profile.displayName,
     passwordHash: profile.passwordHash,
+    role: profile.role,
   };
 }
 
@@ -168,16 +172,19 @@ export async function verifySessionToken(token: string | undefined): Promise<Aut
         email: true,
         displayName: true,
         passwordHash: true,
+        role: true,
+        active: true,
       },
     });
 
-    if (!profile) return null;
+    if (!profile || !profile.active) return null;
 
     return {
       id: profile.userId,
       email: profile.email,
       name: profile.displayName,
       passwordHash: profile.passwordHash,
+      role: profile.role,
     };
   } catch {
     return null;
@@ -200,4 +207,12 @@ export async function hasRecentWebAuthn(userId: string) {
   const token = cookieStore.get(RECENT_WEBAUTHN_COOKIE)?.value;
 
   return verifyRecentWebAuthnToken(token, userId);
+}
+
+export function canManage(user: AuthUser) {
+  return user.role === "ADMIN" || user.role === "MANAGER";
+}
+
+export function canManageFinance(user: AuthUser) {
+  return canManage(user) || user.role === "FINANCE";
 }

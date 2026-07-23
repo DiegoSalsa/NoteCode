@@ -32,7 +32,7 @@ export async function DELETE(
 ) {
     try {
         const { id } = await params;
-        await prisma.client.delete({ where: { id } });
+        await prisma.client.update({ where: { id }, data: { deletedAt: new Date() } });
         invalidateCache("projects:");
         invalidateCache("vault");
         return NextResponse.json({ success: true });

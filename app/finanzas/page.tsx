@@ -8,9 +8,11 @@ import { useDebounce } from "@/lib/use-debounce";
 type Invoice = {
     id: string;
     projectId: string | null;
+    clientId: string | null;
     number: string;
     client: string;
     amount: number;
+    taxRate: number;
     status: string;
     dueDate: string;
     paidAt: string | null;
@@ -18,7 +20,7 @@ type Invoice = {
     updatedAt: string;
 };
 
-const STATUSES = ["Pendiente", "Pagado", "Vencido", "Cancelado"];
+const STATUSES = ["Pendiente", "Parcial", "Pagado", "Vencido", "Cancelado"];
 
 type InvoicesPayload = {
     items: Invoice[];
@@ -50,6 +52,7 @@ function StatusBadge({ status }: { status: string }) {
     switch (status) {
         case "Pagado": style = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"; break;
         case "Pendiente": style = "bg-amber-500/10 text-amber-400 border-amber-500/20"; break;
+        case "Parcial": style = "bg-sky-500/10 text-sky-400 border-sky-500/20"; break;
         case "Vencido": style = "bg-red-500/10 text-red-400 border-red-500/20"; break;
         case "Cancelado": style = "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"; break;
         default: style = "bg-neutral-500/10 text-neutral-400 border-neutral-500/20";
@@ -78,7 +81,8 @@ export default function FinanzasPage() {
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Invoice | null>(null);
-    const [form, setForm] = useState({ number: "", client: "", amount: "", status: "Pendiente", dueDate: "" });
+    const [form, setForm] = useState({ number: "", client: "", clientId: "", projectId: "", amount: "", taxRate: "19", status: "Pendiente", dueDate: "" });
+    const [erpOptions, setErpOptions] = useState<{ clients: { id: string; name: string }[]; projects: { id: string; name: string; clientId: string }[] }>({ clients: [], projects: [] });
     const [saving, setSaving] = useState(false);
 
     const fetchInvoices = useCallback(async ({ append = false, skip = 0 } = {}) => {
@@ -106,6 +110,12 @@ export default function FinanzasPage() {
         fetchInvoices();
     }, [fetchInvoices]);
 
+    useEffect(() => {
+        fetch("/api/erp/options").then((response) => response.ok ? response.json() : null).then((data) => {
+            if (data) setErpOptions({ clients: data.clients ?? [], projects: data.projects ?? [] });
+        });
+    }, []);
+
     async function loadMore() {
         setLoadingMore(true);
         await fetchInvoices({ append: true, skip: nextSkip });
@@ -113,7 +123,7 @@ export default function FinanzasPage() {
 
     function openCreate() {
         setEditing(null);
-        setForm({ number: "", client: "", amount: "", status: "Pendiente", dueDate: "" });
+        setForm({ number: "", client: "", clientId: "", projectId: "", amount: "", taxRate: "19", status: "Pendiente", dueDate: "" });
         setModalOpen(true);
     }
 
@@ -122,7 +132,10 @@ export default function FinanzasPage() {
         setForm({
             number: inv.number,
             client: inv.client,
+            clientId: inv.clientId ?? "",
+            projectId: inv.projectId ?? "",
             amount: String(inv.amount),
+            taxRate: String(inv.taxRate ?? 19),
             status: inv.status,
             dueDate: new Date(inv.dueDate).toISOString().split("T")[0],
         });
@@ -376,14 +389,35 @@ export default function FinanzasPage() {
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" placeholder="INV-2024-001" />
                             </div>
                             <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Proyecto asociado</label>
+                                <select value={form.projectId} onChange={(e) => {
+                                    const project = erpOptions.projects.find((item) => item.id === e.target.value);
+                                    const client = erpOptions.clients.find((item) => item.id === project?.clientId);
+                                    setForm({ ...form, projectId: e.target.value, clientId: project?.clientId ?? form.clientId, client: client?.name ?? form.client });
+                                }} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20">
+                                    <option value="">Factura general</option>
+                                    {erpOptions.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Cliente</label>
-                                <input required value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })}
-                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" placeholder="Nombre del cliente" />
+                                <select required value={form.clientId} onChange={(e) => {
+                                    const client = erpOptions.clients.find((item) => item.id === e.target.value);
+                                    setForm({ ...form, clientId: e.target.value, client: client?.name ?? "" });
+                                }} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20">
+                                    <option value="">Seleccionar cliente...</option>
+                                    {erpOptions.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                                </select>
                             </div>
                             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div>
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Monto ($)</label>
                                     <input required type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                                        className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" />
+                                </div>
+                                <div>
+                                    <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">IVA (%)</label>
+                                    <input required type="number" step="0.01" min="0" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: e.target.value })}
                                         className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors" />
                                 </div>
                                 <div>

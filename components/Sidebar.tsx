@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   Bot,
+  BarChart3,
+  Bell,
+  BriefcaseBusiness,
   Coins,
   FileText,
   FolderKanban,
@@ -23,25 +26,29 @@ const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Gilberto", href: "/gilberto", icon: Bot },
   { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init::0:25", api: "/api/projects/init?q=&skip=0&take=25" },
+  { label: "Gestión", href: "/erp", icon: BriefcaseBusiness },
+  { label: "Reportes", href: "/reportes", icon: BarChart3, roles: ["ADMIN", "MANAGER", "FINANCE"] },
+  { label: "Actividad", href: "/notificaciones", icon: Bell },
   { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes:::0:30", api: "/api/notes?q=&folder=&skip=0&take=30" },
   { label: "Correos", href: "/correos", icon: Mail },
   { label: "Documentos", href: "/documentos", icon: FileText, cacheKey: "documents:::0:50", api: "/api/documents?q=&category=&skip=0&take=50" },
   { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault::0:50", api: "/api/vault?q=&skip=0&take=50" },
-  { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices::0:30", api: "/api/invoices?q=&skip=0&take=30" },
+  { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices::0:30", api: "/api/invoices?q=&skip=0&take=30", roles: ["ADMIN", "MANAGER", "FINANCE"] },
   { label: "Perfil", href: "/perfil", icon: User },
 ];
-
-const mobilePrimaryItems = navItems.slice(0, 4);
-const mobileMoreItems = navItems.slice(4);
 
 type Me = {
   displayName: string;
   email: string;
+  role: string;
 };
 
 export default function Sidebar({ me }: { me: Me | null }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const visibleNavItems = navItems.filter((item) => !("roles" in item) || !item.roles || item.roles.includes(me?.role ?? "MEMBER"));
+  const visibleMobilePrimaryItems = visibleNavItems.slice(0, 4);
+  const visibleMobileMoreItems = visibleNavItems.slice(4);
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -66,7 +73,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
       </div>
 
       <nav className="flex flex-col gap-0.5 px-3 py-4">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
 
@@ -136,7 +143,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
     {moreOpen && (
       <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-50 overflow-hidden rounded-lg border border-white/10 bg-neutral-950 shadow-2xl md:hidden">
         <div className="grid grid-cols-2 gap-1 p-2">
-          {mobileMoreItems.map((item) => {
+          {visibleMobileMoreItems.map((item) => {
             const active = isActive(item.href);
             const Icon = item.icon;
 
@@ -163,7 +170,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
 
     <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-neutral-950/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)] pt-1.5 backdrop-blur md:hidden">
       <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
-        {mobilePrimaryItems.map((item) => {
+        {visibleMobilePrimaryItems.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
 
@@ -192,7 +199,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
           type="button"
           onClick={() => setMoreOpen((current) => !current)}
           className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-medium transition-colors ${
-            moreOpen || mobileMoreItems.some((item) => isActive(item.href))
+            moreOpen || visibleMobileMoreItems.some((item) => isActive(item.href))
               ? "bg-neutral-800 text-neutral-100"
               : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"
           }`}
@@ -200,7 +207,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
           <MoreHorizontal
             size={17}
             strokeWidth={1.5}
-            className={moreOpen || mobileMoreItems.some((item) => isActive(item.href)) ? "text-neutral-100" : "text-neutral-500"}
+            className={moreOpen || visibleMobileMoreItems.some((item) => isActive(item.href)) ? "text-neutral-100" : "text-neutral-500"}
           />
           <span>Mas</span>
         </button>

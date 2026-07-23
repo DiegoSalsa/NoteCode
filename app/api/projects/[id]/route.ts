@@ -13,7 +13,7 @@ export async function GET(
         const { id } = await params;
         const data = await cached(`project:${id}`, 30_000, async () => {
             const project = await prisma.project.findUnique({
-                where: { id },
+                where: { id, deletedAt: null },
                 include: {
                     client: { select: { id: true, name: true } },
                     statusLogs: { orderBy: { createdAt: "desc" } },
@@ -35,7 +35,8 @@ export async function GET(
                         orderBy: { updatedAt: "desc" },
                         select: { id: true, name: true, category: true, size: true, updatedAt: true, createdAt: true },
                     },
-                    invoice: {
+                    invoices: {
+                        orderBy: { createdAt: "desc" },
                         select: { id: true, number: true, amount: true, status: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true },
                     },
                 },
@@ -43,7 +44,7 @@ export async function GET(
 
             if (!project) return null;
 
-            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoice } = project;
+            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices } = project;
             const timeline = [
                 ...statusLogs.map((log) => ({
                     id: `status:${log.id}`,
@@ -87,15 +88,13 @@ export async function GET(
                     description: document.category,
                     at: document.createdAt,
                 })),
-                ...(invoice
-                    ? [{
+                ...invoices.map((invoice) => ({
                         id: `invoice:${invoice.id}`,
                         type: "invoice",
                         title: `Factura ${invoice.number}: ${invoice.status}`,
                         description: `$${invoice.amount.toLocaleString("es-CL")} / vence ${invoice.dueDate.toISOString().slice(0, 10)}`,
                         at: invoice.updatedAt,
-                    }]
-                    : []),
+                    })),
             ].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 80);
 
             return {
@@ -114,7 +113,8 @@ export async function GET(
                 })),
                 notes,
                 documents,
-                invoice,
+                invoice: invoices[0] ?? null,
+                invoices,
                 timeline: timeline.map((item) => ({ ...item, at: item.at.toISOString() })),
             };
         });
@@ -166,25 +166,10 @@ export async function DELETE(
 ) {
     try {
         const { id } = await params;
-        await prisma.$transaction([
-            prisma.invoice.updateMany({
-                where: { projectId: id },
-                data: { projectId: null },
-            }),
-            prisma.auditLog.updateMany({
-                where: { credential: { projectId: id } },
-                data: { credentialId: null },
-            }),
-            prisma.credential.deleteMany({ where: { projectId: id } }),
-            prisma.projectCredential.deleteMany({ where: { projectId: id } }),
-            prisma.projectNote.deleteMany({ where: { projectId: id } }),
-            prisma.projectTask.deleteMany({ where: { projectId: id } }),
-            prisma.projectTech.deleteMany({ where: { projectId: id } }),
-            prisma.projectRequirement.deleteMany({ where: { projectId: id } }),
-            prisma.projectStatusLog.deleteMany({ where: { projectId: id } }),
-            prisma.document.updateMany({ where: { projectId: id }, data: { projectId: null } }),
-            prisma.project.delete({ where: { id } }),
-        ]);
+        await prisma.project.update({
+            where: { id },
+            data: { deletedAt: new Date() },
+        });
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");
         invalidateCache("invoices");

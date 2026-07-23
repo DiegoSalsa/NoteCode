@@ -7,6 +7,7 @@ import FloatingGilberto from "@/components/FloatingGilberto";
 type ShellUser = {
   displayName: string;
   email: string;
+  role: string;
 };
 
 export default function AppShell({
@@ -17,7 +18,7 @@ export default function AppShell({
   user: ShellUser | null;
 }) {
   const pathname = usePathname();
-  const isLogin = pathname === "/";
+  const isLogin = pathname === "/" || pathname.startsWith("/portal/");
 
   if (isLogin) {
     return <>{children}</>;

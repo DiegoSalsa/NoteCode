@@ -15,6 +15,7 @@ export async function resolveClientId(input: { clientId?: string; clientName?: s
   }
 
   const clients = await prisma.client.findMany({
+    where: { deletedAt: null },
     select: { id: true, name: true },
   });
   const existing = clients.find((client) => client.name.toLowerCase() === clientName.toLowerCase());
@@ -35,7 +36,7 @@ export function calculateNetWithoutVat(amount: number) {
 
 export async function syncProjectInvoice(projectId: string) {
   const project = await prisma.project.findUnique({
-    where: { id: projectId },
+    where: { id: projectId, deletedAt: null },
     include: { client: { select: { name: true } } },
   });
 
@@ -46,18 +47,23 @@ export async function syncProjectInvoice(projectId: string) {
   dueDate.setDate(dueDate.getDate() + 15);
 
   await prisma.invoice.upsert({
-    where: { projectId },
+    where: { number: invoiceNumber },
     update: {
+      projectId,
+      clientId: project.clientId,
       number: invoiceNumber,
       client: project.client.name,
       amount: project.agreedAmount,
+      netAmount: calculateNetWithoutVat(project.agreedAmount),
       dueDate,
     },
     create: {
       projectId,
+      clientId: project.clientId,
       number: invoiceNumber,
       client: project.client.name,
       amount: project.agreedAmount,
+      netAmount: calculateNetWithoutVat(project.agreedAmount),
       status: "Pendiente",
       dueDate,
     },

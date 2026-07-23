@@ -8,6 +8,7 @@ const MASKED_SECRET = "************";
 export async function GET() {
   try {
     const credentials = await cached("credentials", 30_000, async () => prisma.credential.findMany({
+      where: { deletedAt: null },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,

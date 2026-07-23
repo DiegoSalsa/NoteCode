@@ -3,6 +3,34 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.journalLine.deleteMany();
+  await prisma.journalEntry.deleteMany();
+  await prisma.account.deleteMany();
+  await prisma.payrollEntry.deleteMany();
+  await prisma.payrollPeriod.deleteMany();
+  await prisma.asset.deleteMany();
+  await prisma.purchaseOrderItem.deleteMany();
+  await prisma.purchaseOrder.deleteMany();
+  await prisma.ticketComment.deleteMany();
+  await prisma.supportTicket.deleteMany();
+  await prisma.supportContract.deleteMany();
+  await prisma.clientApproval.deleteMany();
+  await prisma.clientPortalToken.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.expense.deleteMany();
+  await prisma.supplier.deleteMany();
+  await prisma.teamAbsence.deleteMany();
+  await prisma.timeEntry.deleteMany();
+  await prisma.projectAssignment.deleteMany();
+  await prisma.teamMember.deleteMany();
+  await prisma.quoteItem.deleteMany();
+  await prisma.quote.deleteMany();
+  await prisma.crmActivity.deleteMany();
+  await prisma.opportunity.deleteMany();
+  await prisma.contact.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.automationRule.deleteMany();
+  await prisma.auditEvent.deleteMany();
   await prisma.note.deleteMany();
   await prisma.document.deleteMany();
   await prisma.invoice.deleteMany();
@@ -101,6 +129,33 @@ async function main() {
         content: "- Agregar skeleton loaders\n- Mejorar animaciones de transicion\n- Implementar atajos de teclado\n- Modo oscuro automatico",
         folder: "General",
       },
+    ],
+  });
+
+  await prisma.account.createMany({
+    data: [
+      { code: "1.1.01", name: "Banco", type: "Activo" },
+      { code: "1.1.02", name: "Cuentas por cobrar", type: "Activo" },
+      { code: "1.2.01", name: "Equipos", type: "Activo" },
+      { code: "2.1.01", name: "Cuentas por pagar", type: "Pasivo" },
+      { code: "2.1.02", name: "IVA débito fiscal", type: "Pasivo" },
+      { code: "3.1.01", name: "Capital", type: "Patrimonio" },
+      { code: "4.1.01", name: "Ingresos por proyectos", type: "Ingreso" },
+      { code: "4.1.02", name: "Ingresos recurrentes", type: "Ingreso" },
+      { code: "5.1.01", name: "Remuneraciones", type: "Gasto" },
+      { code: "5.1.02", name: "Software y servicios", type: "Gasto" },
+      { code: "5.1.03", name: "Gastos administrativos", type: "Gasto" },
+    ],
+  });
+
+  await prisma.automationRule.createMany({
+    data: [
+      { name: "Alertar facturas vencidas", trigger: "Factura vencida", action: "Crear notificación" },
+      { name: "Alertar tareas vencidas", trigger: "Tarea vencida", action: "Crear notificación" },
+      { name: "Detectar proyectos inactivos", trigger: "Proyecto inactivo", action: "Crear notificación" },
+      { name: "Avisar contratos por vencer", trigger: "Contrato por vencer", action: "Crear notificación" },
+      { name: "Controlar SLA", trigger: "SLA próximo", action: "Crear notificación" },
+      { name: "Avisar cotizaciones por vencer", trigger: "Cotización por vencer", action: "Crear notificación" },
     ],
   });
 

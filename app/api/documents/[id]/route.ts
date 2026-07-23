@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
-import { deleteDocumentFile, downloadDocumentFile } from "@/lib/storage";
+import { downloadDocumentFile } from "@/lib/storage";
 import { attachmentContentDisposition, documentFileName } from "@/lib/document-files";
 
 export async function GET(
@@ -67,13 +67,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
-    await prisma.document.delete({ where: { id } });
-    if (document.storagePath) {
-      await deleteDocumentFile({
-        path: document.storagePath,
-        bucket: document.storageBucket || "documents",
-      });
-    }
+    await prisma.document.update({ where: { id }, data: { deletedAt: new Date() } });
     invalidateCache("documents");
     if (document.projectId) {
       invalidateCache(`project:${document.projectId}`);

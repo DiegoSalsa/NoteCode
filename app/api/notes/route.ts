@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
         const skip = Math.max(0, Number(searchParams.get("skip") ?? "0") || 0);
         const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
         const where = {
+            deletedAt: null,
             ...(folder ? { folder } : {}),
             ...(q
                 ? {
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
                 }),
                 prisma.note.count({ where }),
                 prisma.note.findMany({
+                    where: { deletedAt: null },
                     distinct: ["folder"],
                     orderBy: { folder: "asc" },
                     select: { folder: true },

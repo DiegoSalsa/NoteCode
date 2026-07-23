@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const limit = searchParams.get("limit");
         const projects = await prisma.project.findMany({
+            where: { deletedAt: null },
             orderBy: { updatedAt: "desc" },
             take: limit ? parseInt(limit) : undefined,
             include: { client: { select: { id: true, name: true } } },

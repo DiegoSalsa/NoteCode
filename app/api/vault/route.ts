@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
     const where = q
       ? {
+          deletedAt: null,
           OR: [
             { name: { contains: q, mode: "insensitive" as const } },
             { username: { contains: q, mode: "insensitive" as const } },
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
             { project: { client: { name: { contains: q, mode: "insensitive" as const } } } },
           ],
         }
-      : {};
+      : { deletedAt: null };
     const data = await cached(`vault:${q}:${skip}:${take}`, 30_000, async () => {
       const [credentials, projects, total] = await Promise.all([
         prisma.credential.findMany({
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
           },
         }),
         prisma.project.findMany({
+          where: { deletedAt: null },
           orderBy: { updatedAt: "desc" },
           select: {
             id: true,

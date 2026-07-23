@@ -109,7 +109,7 @@ export default function LoginForm({ initialState }: LoginFormProps) {
                 disabled={isPending}
                 className="w-full rounded-md px-4 py-2 text-[13px] font-medium text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-200 disabled:opacity-60"
               >
-                Olvide mi contraseÃ±a
+                Olvidé mi contraseña
               </button>
             </div>
           )}
