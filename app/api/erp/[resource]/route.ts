@@ -348,6 +348,7 @@ export async function POST(
         item = await prisma.quote.create({
           data: {
             number: numberValue, clientId: text(body.clientId), opportunityId: text(body.opportunityId) || null,
+            projectId: text(body.projectId) || null,
             title: text(body.title), status: text(body.status) || "Borrador", currency: text(body.currency) || "CLP",
             taxRate: number(body.taxRate, 19), discount: number(body.discount), validUntil: date(body.validUntil),
             terms: text(body.terms) || null, notes: text(body.notes) || null,

@@ -1,6 +1,8 @@
+import { createHash, randomBytes } from "crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { notify, recordAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { invalidateCache } from "@/lib/server-cache";
@@ -28,6 +30,23 @@ function isValidEmail(value: string) {
 
 const requirementCategorySchema = z.enum(["Funcional", "No funcional"]);
 const requirementPrioritySchema = z.enum(["Baja", "Media", "Alta"]);
+const quoteItemSchema = z.object({
+    description: z.string().min(1).max(500),
+    quantity: z.number().positive().default(1),
+    unitPrice: z.number().nonnegative().describe("Precio unitario neto antes de IVA, en CLP."),
+});
+
+function calculateQuoteTotals(
+    items: Array<{ quantity: number; unitPrice: number }>,
+    discount: number,
+    taxRate: number,
+) {
+    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const discountAmount = subtotal * Math.max(0, discount) / 100;
+    const net = subtotal - discountAmount;
+    const tax = net * Math.max(0, taxRate) / 100;
+    return { subtotal, discountAmount, net, tax, total: net + tax };
+}
 
 export type GilbertoToolContext = {
     pathname?: string;
@@ -44,7 +63,7 @@ async function resolveProjectForTool(input: {
     if (input.projectId || input.contextProjectId) {
         const project = await prisma.project.findUnique({
             where: { id: input.projectId || input.contextProjectId || "", deletedAt: null },
-            select: { id: true, name: true, status: true, client: { select: { name: true } } },
+            select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, client: { select: { id: true, name: true, company: true } } },
         });
         if (project) return { project };
     }
@@ -63,7 +82,7 @@ async function resolveProjectForTool(input: {
         },
         orderBy: { updatedAt: "desc" },
         take: 5,
-        select: { id: true, name: true, status: true, client: { select: { name: true } } },
+        select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, client: { select: { id: true, name: true, company: true } } },
     });
 
     if (matches.length === 1) return { project: matches[0] };
@@ -75,6 +94,46 @@ async function resolveProjectForTool(input: {
     }
 
     return { error: "No encontre un proyecto con ese nombre." };
+}
+
+async function resolveClientForTool(clientName: string) {
+    const name = clientName.trim();
+    if (!name) return { error: "Necesito saber a que cliente te refieres." };
+
+    const matches = await prisma.client.findMany({
+        where: {
+            deletedAt: null,
+            OR: [
+                { name: { contains: name, mode: "insensitive" } },
+                { company: { contains: name, mode: "insensitive" } },
+            ],
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 5,
+        select: { id: true, name: true, company: true, email: true },
+    });
+
+    if (matches.length === 1) return { client: matches[0] };
+    if (matches.length > 1) return { error: "Encontre varios clientes parecidos. Dime cual usar.", matches };
+    return { error: "No encontre un cliente con ese nombre." };
+}
+
+async function nextQuoteNumber() {
+    const prefix = `COT-${new Date().getFullYear()}-`;
+    const latest = await prisma.quote.findFirst({
+        where: { number: { startsWith: prefix } },
+        orderBy: { number: "desc" },
+        select: { number: true },
+    });
+    const latestSequence = Number(latest?.number.slice(prefix.length)) || 0;
+
+    for (let sequence = latestSequence + 1; sequence < latestSequence + 1000; sequence += 1) {
+        const number = `${prefix}${String(sequence).padStart(4, "0")}`;
+        const exists = await prisma.quote.findUnique({ where: { number }, select: { id: true } });
+        if (!exists) return number;
+    }
+
+    return `${prefix}${Date.now()}`;
 }
 
 export function createTools(context: GilbertoToolContext = {}) {
@@ -1309,6 +1368,388 @@ export function createTools(context: GilbertoToolContext = {}) {
             };
         },
     }),
+    crearCotizacion: tool({
+        description:
+            "Crea una cotizacion formal en el ERP, vinculada al proyecto y cliente, con una propuesta imprimible o guardable como PDF. Usala de inmediato cuando el usuario diga crear o generar una cotizacion; una orden directa no necesita una segunda confirmacion.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay un proyecto abierto."),
+            projectName: z.string().default("").describe("Nombre del proyecto. Opcional si hay un proyecto abierto."),
+            clientName: z.string().default("").describe("Cliente, solo si la cotizacion no pertenece a un proyecto."),
+            title: z.string().max(200).default("").describe("Titulo de la propuesta. Si se omite se usa el nombre del proyecto."),
+            items: z.array(quoteItemSchema).max(30).default([]).describe("Lineas netas antes de IVA. Si se omiten, se usa el monto total o el monto acordado del proyecto."),
+            totalClp: z.number().nonnegative().default(0).describe("Total final con IVA incluido, usado para crear una linea automatica si no se entregan items."),
+            taxRate: z.number().min(0).max(100).default(19).describe("IVA en porcentaje."),
+            discount: z.number().min(0).max(99).default(0).describe("Descuento porcentual."),
+            validDays: z.number().int().min(1).max(365).default(30),
+            terms: z.string().max(4000).default(""),
+            notes: z.string().max(2000).default(""),
+            status: z.enum(["Borrador", "Enviada"]).default("Borrador"),
+        }),
+        execute: async ({ projectId, projectName, clientName, title, items, totalClp, taxRate, discount, validDays, terms, notes, status }) => {
+            const hasProjectReference = Boolean(projectId.trim() || projectName.trim() || context.currentProjectId);
+            const resolvedProject = hasProjectReference
+                ? await resolveProjectForTool({
+                      projectId: projectId.trim() || undefined,
+                      projectName,
+                      contextProjectId: context.currentProjectId,
+                  })
+                : null;
+
+            if (resolvedProject && !resolvedProject.project) return resolvedProject;
+            const project = resolvedProject?.project ?? null;
+
+            let client: { id: string; name: string; company: string | null };
+            if (project) {
+                client = project.client;
+                const existing = await prisma.quote.findFirst({
+                    where: { projectId: project.id, deletedAt: null },
+                    include: { items: { orderBy: { sortOrder: "asc" } }, client: { select: { id: true, name: true, company: true } } },
+                });
+                if (existing) {
+                    return {
+                        alreadyExists: true,
+                        message: "Este proyecto ya tiene una cotizacion formal.",
+                        quote: existing,
+                        totals: calculateQuoteTotals(existing.items, existing.discount, existing.taxRate),
+                        proposalUrl: `/cotizaciones/${existing.id}`,
+                        erpUrl: "/erp?tab=cotizaciones",
+                    };
+                }
+            } else {
+                const resolvedClient = await resolveClientForTool(clientName);
+                if (!resolvedClient.client) return resolvedClient;
+                client = resolvedClient.client;
+            }
+
+            let quoteItems = items.map((item) => ({
+                description: item.description.trim(),
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+            }));
+
+            if (!quoteItems.length) {
+                const finalTotal = totalClp > 0 ? totalClp : project?.agreedAmount ?? 0;
+                if (finalTotal <= 0) {
+                    return { error: "Necesito el monto total o al menos una linea con precio para crear la cotizacion." };
+                }
+                const factor = (1 - discount / 100) * (1 + taxRate / 100);
+                quoteItems = [{
+                    description: title.trim() || project?.name || "Servicios profesionales",
+                    quantity: 1,
+                    unitPrice: finalTotal / factor,
+                }];
+            }
+
+            const validUntil = new Date();
+            validUntil.setDate(validUntil.getDate() + validDays);
+            const number = await nextQuoteNumber();
+            const quote = await prisma.quote.create({
+                data: {
+                    number,
+                    clientId: client.id,
+                    projectId: project?.id ?? null,
+                    title: title.trim() || project?.name || `Propuesta para ${client.company || client.name}`,
+                    status,
+                    currency: "CLP",
+                    taxRate,
+                    discount,
+                    validUntil,
+                    terms: terms.trim() || null,
+                    notes: notes.trim() || null,
+                    sentAt: status === "Enviada" ? new Date() : null,
+                    items: {
+                        create: quoteItems.map((item, index) => ({ ...item, sortOrder: index })),
+                    },
+                },
+                include: {
+                    client: { select: { id: true, name: true, company: true, email: true } },
+                    project: { select: { id: true, name: true } },
+                    items: { orderBy: { sortOrder: "asc" } },
+                },
+            });
+
+            const totals = calculateQuoteTotals(quote.items, quote.discount, quote.taxRate);
+            await Promise.all([
+                recordAudit({
+                    action: "CREATE",
+                    entityType: "Quote",
+                    entityId: quote.id,
+                    summary: `Cotizacion ${quote.number} creada por Gilberto`,
+                    metadata: { projectId: quote.projectId, clientId: quote.clientId, total: totals.total },
+                }),
+                notify({
+                    userId: context.userId,
+                    type: "quote",
+                    title: `Cotizacion creada: ${quote.number}`,
+                    message: `${quote.title} por ${formatClp(totals.total)}.`,
+                    href: "/erp?tab=cotizaciones",
+                    severity: "success",
+                }),
+            ]);
+            invalidateCache(`project:${project?.id ?? ""}`);
+
+            return {
+                created: true,
+                quote,
+                totals: {
+                    ...totals,
+                    subtotalClp: formatClp(totals.subtotal),
+                    taxClp: formatClp(totals.tax),
+                    totalClp: formatClp(totals.total),
+                },
+                proposalUrl: `/cotizaciones/${quote.id}`,
+                erpUrl: "/erp?tab=cotizaciones",
+                instruction: "Informa que la cotizacion ya fue creada y entrega el enlace de propuesta. Indica que desde ahi puede imprimirse o guardarse como PDF.",
+            };
+        },
+    }),
+    crearAprobacionCliente: tool({
+        description:
+            "Crea una solicitud de aprobacion visible en el portal del cliente para un proyecto. Una orden directa del usuario autoriza crearla sin otra confirmacion.",
+        inputSchema: z.object({
+            projectId: z.string().default(""),
+            projectName: z.string().default(""),
+            type: z.string().min(1).max(80).default("Entregable"),
+            title: z.string().min(1).max(200),
+            description: z.string().max(3000).default(""),
+        }),
+        execute: async ({ projectId, projectName, type, title, description }) => {
+            const resolved = await resolveProjectForTool({
+                projectId: projectId.trim() || undefined,
+                projectName,
+                contextProjectId: context.currentProjectId,
+            });
+            if (!resolved.project) return resolved;
+
+            const approval = await prisma.clientApproval.create({
+                data: {
+                    projectId: resolved.project.id,
+                    type,
+                    title,
+                    description: description.trim() || null,
+                },
+            });
+            await Promise.all([
+                recordAudit({
+                    action: "CREATE",
+                    entityType: "ClientApproval",
+                    entityId: approval.id,
+                    summary: `Aprobacion solicitada por Gilberto: ${title}`,
+                    metadata: { projectId: resolved.project.id },
+                }),
+                notify({
+                    userId: context.userId,
+                    type: "approval",
+                    title: "Aprobacion de cliente creada",
+                    message: `${resolved.project.name}: ${title}`,
+                    href: "/erp?tab=aprobaciones",
+                }),
+            ]);
+
+            return {
+                created: true,
+                approval,
+                project: resolved.project,
+                erpUrl: "/erp?tab=aprobaciones",
+                portalVisible: true,
+            };
+        },
+    }),
+    generarAccesoPortal: tool({
+        description:
+            "Genera un enlace seguro de portal para un cliente. Usala solo cuando el usuario pida explicitamente crear o regenerar el acceso; el enlace completo se devuelve una sola vez.",
+        inputSchema: z.object({
+            projectId: z.string().default("").describe("Proyecto desde el que resolver el cliente."),
+            projectName: z.string().default(""),
+            clientName: z.string().default(""),
+            label: z.string().min(1).max(120).default("Portal principal"),
+            expiresDays: z.number().int().min(0).max(3650).default(0).describe("0 significa sin vencimiento."),
+        }),
+        execute: async ({ projectId, projectName, clientName, label, expiresDays }) => {
+            const hasProjectReference = Boolean(projectId.trim() || projectName.trim() || context.currentProjectId);
+            const resolvedProject = hasProjectReference
+                ? await resolveProjectForTool({
+                      projectId: projectId.trim() || undefined,
+                      projectName,
+                      contextProjectId: context.currentProjectId,
+                  })
+                : null;
+            if (resolvedProject && !resolvedProject.project) return resolvedProject;
+
+            let client: { id: string; name: string; company: string | null };
+            if (resolvedProject?.project) {
+                client = resolvedProject.project.client;
+            } else {
+                const resolvedClient = await resolveClientForTool(clientName);
+                if (!resolvedClient.client) return resolvedClient;
+                client = resolvedClient.client;
+            }
+
+            const rawToken = randomBytes(32).toString("base64url");
+            const expiresAt = expiresDays > 0 ? new Date(Date.now() + expiresDays * 86400000) : null;
+            const access = await prisma.clientPortalToken.create({
+                data: {
+                    clientId: client.id,
+                    tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+                    label,
+                    expiresAt,
+                },
+                select: { id: true, label: true, expiresAt: true, createdAt: true },
+            });
+            await recordAudit({
+                action: "CREATE",
+                entityType: "ClientPortalToken",
+                entityId: access.id,
+                summary: `Acceso de portal creado por Gilberto para ${client.name}`,
+                metadata: { clientId: client.id, expiresAt: expiresAt?.toISOString() ?? null },
+            });
+
+            return {
+                created: true,
+                client,
+                access,
+                portalUrl: `/portal/${rawToken}`,
+                warning: "Muestra este enlace ahora: el token no puede recuperarse despues.",
+            };
+        },
+    }),
+    registrarGasto: tool({
+        description:
+            "Registra un gasto real en el ERP y lo vincula opcionalmente a proyecto y proveedor. Una orden directa y con monto claro autoriza el registro.",
+        inputSchema: z.object({
+            description: z.string().min(1).max(500),
+            amount: z.number().positive().describe("Monto total en CLP."),
+            category: z.string().min(1).max(100).default("General"),
+            date: z.string().default("").describe("YYYY-MM-DD; vacio usa hoy."),
+            projectName: z.string().default(""),
+            supplierName: z.string().default(""),
+            status: z.enum(["Pendiente", "Pagado", "Reembolsado"]).default("Pagado"),
+            recurring: z.boolean().default(false),
+            notes: z.string().max(2000).default(""),
+        }),
+        execute: async ({ description, amount, category, date, projectName, supplierName, status, recurring, notes }) => {
+            if (!canUseFinance) return { error: "No tienes permiso para registrar gastos." };
+            const parsedDate = date.trim() ? new Date(date) : new Date();
+            if (Number.isNaN(parsedDate.getTime())) return { error: "La fecha no es valida. Usa YYYY-MM-DD." };
+
+            const project = projectName.trim()
+                ? await prisma.project.findFirst({
+                      where: { deletedAt: null, name: { contains: projectName.trim(), mode: "insensitive" } },
+                      select: { id: true, name: true },
+                  })
+                : context.currentProjectId
+                  ? await prisma.project.findUnique({ where: { id: context.currentProjectId }, select: { id: true, name: true } })
+                  : null;
+            const supplier = supplierName.trim()
+                ? await prisma.supplier.findFirst({
+                      where: { deletedAt: null, name: { contains: supplierName.trim(), mode: "insensitive" } },
+                      select: { id: true, name: true },
+                  })
+                : null;
+
+            if (projectName.trim() && !project) return { error: "No encontre el proyecto indicado." };
+            if (supplierName.trim() && !supplier) return { error: "No encontre el proveedor indicado." };
+
+            const expense = await prisma.expense.create({
+                data: {
+                    projectId: project?.id ?? null,
+                    supplierId: supplier?.id ?? null,
+                    description,
+                    category,
+                    amount,
+                    date: parsedDate,
+                    status,
+                    recurring,
+                    notes: notes.trim() || null,
+                },
+            });
+            await recordAudit({
+                action: "CREATE",
+                entityType: "Expense",
+                entityId: expense.id,
+                summary: `Gasto registrado por Gilberto: ${description}`,
+                metadata: { amount, projectId: project?.id ?? null, supplierId: supplier?.id ?? null },
+            });
+
+            return {
+                created: true,
+                expense: { ...expense, amountClp: formatClp(expense.amount) },
+                project,
+                supplier,
+                erpUrl: "/erp?tab=gastos",
+            };
+        },
+    }),
+    registrarPago: tool({
+        description:
+            "Registra un pago contra una factura y actualiza automaticamente su estado. Si el usuario ordena registrarlo e indica claramente factura y monto, esa orden cuenta como confirmacion.",
+        inputSchema: z.object({
+            invoiceNumber: z.string().min(1).max(100),
+            amount: z.number().positive(),
+            paidAt: z.string().default("").describe("YYYY-MM-DD; vacio usa hoy."),
+            method: z.string().min(1).max(80).default("Transferencia"),
+            reference: z.string().max(200).default(""),
+            notes: z.string().max(2000).default(""),
+            confirmado: z.boolean().default(false).describe("True si el usuario dio una orden directa con factura y monto claros."),
+        }),
+        execute: async ({ invoiceNumber, amount, paidAt, method, reference, notes, confirmado }) => {
+            if (!canUseFinance) return { error: "No tienes permiso para registrar pagos." };
+            const invoices = await prisma.invoice.findMany({
+                where: { deletedAt: null, number: { contains: invoiceNumber.trim(), mode: "insensitive" } },
+                take: 5,
+                include: { payments: true },
+            });
+            if (invoices.length !== 1) {
+                return invoices.length
+                    ? { error: "Encontre varias facturas parecidas. Indica el numero exacto.", matches: invoices.map((item) => ({ id: item.id, number: item.number, client: item.client, amount: item.amount })) }
+                    : { error: "No encontre la factura indicada." };
+            }
+            const invoice = invoices[0];
+            const parsedDate = paidAt.trim() ? new Date(paidAt) : new Date();
+            if (Number.isNaN(parsedDate.getTime())) return { error: "La fecha no es valida. Usa YYYY-MM-DD." };
+            if (!confirmado) {
+                return confirmationRequired("registrarPago", {
+                    invoice: invoice.number,
+                    client: invoice.client,
+                    amountClp: formatClp(amount),
+                    paidAt: parsedDate.toISOString().slice(0, 10),
+                    method,
+                });
+            }
+
+            const payment = await prisma.payment.create({
+                data: {
+                    invoiceId: invoice.id,
+                    amount,
+                    paidAt: parsedDate,
+                    method,
+                    reference: reference.trim() || null,
+                    notes: notes.trim() || null,
+                },
+            });
+            const paid = invoice.payments.reduce((sum, item) => sum + item.amount, 0) + amount;
+            const nextStatus = paid >= invoice.amount ? "Pagado" : "Parcial";
+            await prisma.invoice.update({
+                where: { id: invoice.id },
+                data: { status: nextStatus, paidAt: nextStatus === "Pagado" ? parsedDate : null },
+            });
+            await recordAudit({
+                action: "CREATE",
+                entityType: "Payment",
+                entityId: payment.id,
+                summary: `Pago registrado por Gilberto en ${invoice.number}`,
+                metadata: { invoiceId: invoice.id, amount },
+            });
+            invalidateCache("invoices");
+
+            return {
+                created: true,
+                payment: { ...payment, amountClp: formatClp(payment.amount) },
+                invoice: { number: invoice.number, client: invoice.client, status: nextStatus, paidClp: formatClp(paid), totalClp: formatClp(invoice.amount) },
+                erpUrl: "/erp?tab=pagos",
+            };
+        },
+    }),
     getCRM: tool({
         description: "Resume el pipeline comercial, oportunidades, valor ponderado y proximas acciones.",
         inputSchema: z.object({}),
@@ -1440,6 +1881,166 @@ export function createTools(context: GilbertoToolContext = {}) {
                     slaBreached: Boolean(item.resolutionDue && item.resolutionDue < now),
                 })),
             };
+        },
+    }),
+    consultarERP: tool({
+        description:
+            "Consulta los modulos nuevos del ERP con datos reales y recientes. Usala para clientes, contactos, cotizaciones, gastos, pagos, contratos, aprobaciones, ordenes de compra, activos, remuneraciones, contabilidad, automatizaciones, notificaciones o accesos de portal.",
+        inputSchema: z.object({
+            area: z.enum([
+                "clientes",
+                "contactos",
+                "cotizaciones",
+                "gastos",
+                "pagos",
+                "contratos",
+                "aprobaciones",
+                "ordenes-compra",
+                "activos",
+                "remuneraciones",
+                "contabilidad",
+                "automatizaciones",
+                "notificaciones",
+                "portal",
+            ]),
+            query: z.string().max(160).default("").describe("Texto opcional para acotar la busqueda."),
+            limit: z.number().int().min(1).max(50).default(20),
+        }),
+        execute: async ({ area, query, limit }) => {
+            const financialAreas = ["gastos", "pagos", "ordenes-compra", "activos", "remuneraciones", "contabilidad"];
+            if (financialAreas.includes(area) && !canUseFinance) {
+                return { error: "No tienes permiso para consultar esta informacion financiera." };
+            }
+
+            const q = query.trim();
+            switch (area) {
+                case "clientes":
+                    return prisma.client.findMany({
+                        where: {
+                            deletedAt: null,
+                            ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { company: { contains: q, mode: "insensitive" } }] } : {}),
+                        },
+                        orderBy: { updatedAt: "desc" },
+                        take: limit,
+                        select: {
+                            id: true, name: true, company: true, email: true, phone: true, status: true,
+                            _count: { select: { projects: true, opportunities: true, invoices: true, tickets: true } },
+                        },
+                    });
+                case "contactos":
+                    return prisma.contact.findMany({
+                        where: {
+                            deletedAt: null,
+                            ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] } : {}),
+                        },
+                        orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+                        take: limit,
+                        include: { client: { select: { id: true, name: true, company: true } } },
+                    });
+                case "cotizaciones": {
+                    const quotes = await prisma.quote.findMany({
+                        where: {
+                            deletedAt: null,
+                            ...(q ? { OR: [{ number: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } }] } : {}),
+                        },
+                        orderBy: { createdAt: "desc" },
+                        take: limit,
+                        include: {
+                            client: { select: { id: true, name: true, company: true } },
+                            project: { select: { id: true, name: true } },
+                            items: { orderBy: { sortOrder: "asc" } },
+                        },
+                    });
+                    return quotes.map((quote) => ({
+                        ...quote,
+                        totals: calculateQuoteTotals(quote.items, quote.discount, quote.taxRate),
+                        proposalUrl: `/cotizaciones/${quote.id}`,
+                    }));
+                }
+                case "gastos":
+                    return prisma.expense.findMany({
+                        where: { deletedAt: null, ...(q ? { description: { contains: q, mode: "insensitive" } } : {}) },
+                        orderBy: { date: "desc" },
+                        take: limit,
+                        include: { supplier: { select: { name: true } }, project: { select: { name: true } } },
+                    });
+                case "pagos":
+                    return prisma.payment.findMany({
+                        orderBy: { paidAt: "desc" },
+                        take: limit,
+                        include: { invoice: { select: { number: true, client: true, amount: true, status: true } } },
+                    });
+                case "contratos":
+                    return prisma.supportContract.findMany({
+                        where: { deletedAt: null, ...(q ? { name: { contains: q, mode: "insensitive" } } : {}) },
+                        orderBy: { updatedAt: "desc" },
+                        take: limit,
+                        include: { client: { select: { name: true, company: true } }, project: { select: { name: true } } },
+                    });
+                case "aprobaciones":
+                    return prisma.clientApproval.findMany({
+                        where: q ? { OR: [{ title: { contains: q, mode: "insensitive" } }, { project: { name: { contains: q, mode: "insensitive" } } }] } : {},
+                        orderBy: { requestedAt: "desc" },
+                        take: limit,
+                        include: { project: { select: { id: true, name: true, client: { select: { name: true } } } } },
+                    });
+                case "ordenes-compra":
+                    return prisma.purchaseOrder.findMany({
+                        where: { deletedAt: null, ...(q ? { number: { contains: q, mode: "insensitive" } } : {}) },
+                        orderBy: { createdAt: "desc" },
+                        take: limit,
+                        include: { supplier: { select: { name: true } }, project: { select: { name: true } }, items: true },
+                    });
+                case "activos":
+                    return prisma.asset.findMany({
+                        where: {
+                            deletedAt: null,
+                            ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { vendor: { contains: q, mode: "insensitive" } }] } : {}),
+                        },
+                        orderBy: { updatedAt: "desc" },
+                        take: limit,
+                        select: {
+                            id: true, name: true, type: true, category: true, vendor: true, status: true,
+                            location: true, renewalDate: true, monthlyCost: true,
+                            assignedTo: { select: { name: true } },
+                        },
+                    });
+                case "remuneraciones":
+                    return prisma.payrollPeriod.findMany({
+                        where: { deletedAt: null },
+                        orderBy: { startDate: "desc" },
+                        take: limit,
+                        include: { entries: { include: { teamMember: { select: { name: true, role: true } } } } },
+                    });
+                case "contabilidad": {
+                    const [accounts, journal] = await Promise.all([
+                        prisma.account.findMany({ where: { active: true }, orderBy: { code: "asc" }, take: 100 }),
+                        prisma.journalEntry.findMany({
+                            orderBy: { date: "desc" },
+                            take: limit,
+                            include: { lines: { include: { account: { select: { code: true, name: true } } } } },
+                        }),
+                    ]);
+                    return { accounts, journal };
+                }
+                case "automatizaciones":
+                    return prisma.automationRule.findMany({ orderBy: { updatedAt: "desc" }, take: limit });
+                case "notificaciones":
+                    return prisma.notification.findMany({
+                        where: context.userId ? { OR: [{ userId: context.userId }, { userId: null }] } : { userId: null },
+                        orderBy: { createdAt: "desc" },
+                        take: limit,
+                    });
+                case "portal":
+                    return prisma.clientPortalToken.findMany({
+                        orderBy: { createdAt: "desc" },
+                        take: limit,
+                        select: {
+                            id: true, label: true, expiresAt: true, lastUsedAt: true, revokedAt: true, createdAt: true,
+                            client: { select: { id: true, name: true, company: true } },
+                        },
+                    });
+            }
         },
     }),
     crearOportunidad: tool({
