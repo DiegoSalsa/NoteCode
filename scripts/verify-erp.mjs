@@ -18,6 +18,15 @@ try {
       include: { items: true },
     });
     const project = await tx.project.create({ data: { name: "ERP Verify Project", clientId: client.id, agreedAmount: 1190000, quote: { connect: { id: quote.id } } } });
+    await tx.clientPortalToken.create({ data: { clientId: client.id, tokenHash: `verify-${Date.now()}` } });
+    await tx.quote.update({ where: { id: quote.id }, data: { status: "Enviada", sentAt: new Date() } });
+    const portalQuotes = await tx.quote.count({ where: { clientId: client.id, deletedAt: null, status: { not: "Borrador" } } });
+    const pushUser = await tx.userProfile.create({
+      data: { userId: `verify-${Date.now()}`, email: `verify-${Date.now()}@example.invalid`, displayName: "ERP Verify Push" },
+    });
+    await tx.pushSubscription.create({
+      data: { userId: pushUser.userId, endpoint: `https://push.example.invalid/${Date.now()}`, p256dh: "verify-p256dh", auth: "verify-auth" },
+    });
     const member = await tx.teamMember.create({ data: { name: "ERP Verify Member", weeklyCapacity: 40, hourlyCost: 15000, billableRate: 35000 } });
     await tx.projectAssignment.create({ data: { projectId: project.id, teamMemberId: member.id, allocation: 50 } });
     await tx.timeEntry.create({ data: { projectId: project.id, teamMemberId: member.id, description: "Implementación", date: new Date(), hours: 4 } });
@@ -54,7 +63,7 @@ try {
 
     const debitTotal = journal.lines.reduce((sum, line) => sum + line.debit, 0);
     const creditTotal = journal.lines.reduce((sum, line) => sum + line.credit, 0);
-    if (debitTotal !== creditTotal || quote.items.length !== 1 || !order.id) {
+    if (debitTotal !== creditTotal || quote.items.length !== 1 || !order.id || portalQuotes !== 1) {
       throw new Error("La verificación integral produjo datos inconsistentes.");
     }
 
@@ -62,7 +71,7 @@ try {
       verified: [
         "crm", "quotes", "projects", "team", "assignments", "time",
         "suppliers", "expenses", "invoices", "payments", "contracts",
-        "tickets", "approvals", "purchases", "assets", "payroll", "accounting",
+        "tickets", "approvals", "portal", "push", "purchases", "assets", "payroll", "accounting",
       ],
       balancedJournal: debitTotal,
       rollback: true,

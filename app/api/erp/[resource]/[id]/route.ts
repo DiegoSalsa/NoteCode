@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canManage, canManageFinance, getCurrentUser } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { invalidateCache } from "@/lib/server-cache";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -55,6 +56,7 @@ export async function PATCH(
         default: return NextResponse.json({ error: "Tipo de elemento desconocido." }, { status: 400 });
       }
       await recordAudit({ action: "RESTORE", entityType, entityId: originalId, summary: "Restaurado desde la papelera" });
+      invalidateCache("erp:");
       return NextResponse.json(item);
     }
     switch (resource) {
@@ -90,6 +92,7 @@ export async function PATCH(
           } });
           item = await prisma.opportunity.update({ where: { id }, data: { stage: "Ganado", probability: 100, clientId: client.id } });
           await recordAudit({ action: "CONVERT", entityType: "Opportunity", entityId: id, summary: `Convertida al proyecto ${project.name}`, metadata: { projectId: project.id } });
+          invalidateCache("erp:");
           return NextResponse.json({ opportunity: item, project });
         }
         item = await prisma.opportunity.update({ where: { id }, data: {
@@ -137,6 +140,7 @@ export async function PATCH(
           item = await prisma.quote.update({ where: { id }, data: { status: "Aprobada", approvedAt: new Date(), projectId: project.id } });
           if (quote.opportunityId) await prisma.opportunity.update({ where: { id: quote.opportunityId }, data: { stage: "Ganado", probability: 100, clientId: quote.clientId } });
           await recordAudit({ action: "CONVERT", entityType: "Quote", entityId: id, summary: `Convertida al proyecto ${project.name}`, metadata: { projectId: project.id } });
+          invalidateCache("erp:");
           return NextResponse.json({ quote: item, project });
         }
         const status = body.status === undefined ? undefined : text(body.status);
@@ -300,6 +304,7 @@ export async function PATCH(
     }
 
     await recordAudit({ action: "UPDATE", entityType: resource, entityId: item.id, summary: `Actualización en ${resource}` });
+    invalidateCache("erp:");
     return NextResponse.json(item);
   } catch (error) {
     console.error(`[erp:${resource}:${id}:patch]`, error);
@@ -353,6 +358,7 @@ export async function DELETE(
     }
 
     await recordAudit({ action: "DELETE", entityType: resource, entityId: id, summary: `Enviado a papelera desde ${resource}` });
+    invalidateCache("erp:");
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error(`[erp:${resource}:${id}:delete]`, error);

@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { sendPushToAll, sendPushToUser } from "@/lib/push";
 
 export async function recordAudit(input: {
   action: string;
@@ -34,7 +35,7 @@ export async function notify(input: {
   href?: string;
   severity?: string;
 }) {
-  return prisma.notification.create({
+  const notification = await prisma.notification.create({
     data: {
       userId: input.userId ?? null,
       type: input.type,
@@ -44,4 +45,20 @@ export async function notify(input: {
       severity: input.severity ?? "info",
     },
   });
+  const payload = {
+    title: notification.title,
+    body: notification.message,
+    url: notification.href ?? "/notificaciones",
+    tag: `${notification.type}:${notification.id}`,
+    severity: notification.severity,
+  };
+
+  try {
+    if (notification.userId) await sendPushToUser(notification.userId, payload);
+    else await sendPushToAll(payload);
+  } catch (error) {
+    console.error("[push:notify]", error);
+  }
+
+  return notification;
 }

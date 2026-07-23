@@ -60,6 +60,7 @@ prisma/migrations-manual/20260622_documents_storage.sql
 prisma/migrations-manual/20260622_project_tasks_timeline.sql
 prisma/migrations-manual/20260723_full_erp.sql
 prisma/migrations-manual/20260723_erp_defaults.sql
+prisma/migrations-manual/20260723_push_notifications.sql
 ```
 
 The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.
@@ -73,3 +74,19 @@ CRON_SECRET="<random-secret>"
 ```
 
 Vercel sends it as a bearer token when invoking the cron route. Users can also run the same checks manually from **Actividad → Revisar ahora**.
+
+## Mobile push notifications
+
+NoteCode derives a stable VAPID key pair from the existing `SESSION_SECRET`, so push works without adding another secret. The private key never leaves the server.
+
+To manage a separate key pair explicitly, add these optional values and keep the private key outside Git:
+
+```text
+NEXT_PUBLIC_VAPID_PUBLIC_KEY="<public-key>"
+VAPID_PRIVATE_KEY="<private-key>"
+VAPID_SUBJECT="mailto:admin@purocode.com"
+```
+
+When explicit values are present they take precedence over the derived pair. Add them to Vercel for Production, Preview and Development, then redeploy. Never rotate only one side of the key pair: existing device subscriptions would stop working. Rotating `SESSION_SECRET` also changes the fallback VAPID identity and requires devices to subscribe again.
+
+On Android, notifications can be enabled directly from **Actividad → Notificaciones push**. On iPhone/iPad, first add NoteCode to the Home Screen from Safari, open the installed app and enable notifications from the same panel. Web Push on Apple devices requires the installed web app.

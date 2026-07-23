@@ -1503,6 +1503,603 @@ export function createTools(context: GilbertoToolContext = {}) {
             };
         },
     }),
+    publicarCotizacionPortal: tool({
+        description:
+            "Publica una cotizacion existente en el portal del cliente cambiandola de Borrador a Enviada. Usala cuando el usuario diga subir, publicar, enviar o hacer visible una cotizacion en el portal; no necesita crear otro portal ni pedir confirmacion adicional.",
+        inputSchema: z.object({
+            quoteId: z.string().default(""),
+            quoteNumber: z.string().default(""),
+            projectId: z.string().default(""),
+            projectName: z.string().default(""),
+        }),
+        execute: async ({ quoteId, quoteNumber, projectId, projectName }) => {
+            let resolvedProjectId = projectId.trim() || context.currentProjectId || "";
+            if (!resolvedProjectId && projectName.trim()) {
+                const resolved = await resolveProjectForTool({ projectName });
+                if (!resolved.project) return resolved;
+                resolvedProjectId = resolved.project.id;
+            }
+
+            const matches = await prisma.quote.findMany({
+                where: {
+                    deletedAt: null,
+                    ...(quoteId.trim()
+                        ? { id: quoteId.trim() }
+                        : quoteNumber.trim()
+                          ? { number: { contains: quoteNumber.trim(), mode: "insensitive" } }
+                          : resolvedProjectId
+                            ? { projectId: resolvedProjectId }
+                            : {}),
+                },
+                orderBy: { updatedAt: "desc" },
+                take: 5,
+                include: {
+                    client: { select: { id: true, name: true, company: true } },
+                    project: { select: { id: true, name: true } },
+                    items: { orderBy: { sortOrder: "asc" } },
+                },
+            });
+            if (!quoteId.trim() && !quoteNumber.trim() && !resolvedProjectId) {
+                return { error: "Necesito la cotizacion, su numero o el proyecto al que pertenece." };
+            }
+            if (matches.length !== 1) {
+                return matches.length
+                    ? { error: "Encontre varias cotizaciones. Indica cual publicar.", matches: matches.map((item) => ({ id: item.id, number: item.number, title: item.title, project: item.project?.name })) }
+                    : { error: "No encontre una cotizacion para publicar." };
+            }
+
+            const quote = matches[0];
+            const [updated, activePortals] = await Promise.all([
+                prisma.quote.update({
+                    where: { id: quote.id },
+                    data: { status: "Enviada", sentAt: quote.sentAt ?? new Date() },
+                    include: {
+                        client: { select: { id: true, name: true, company: true } },
+                        project: { select: { id: true, name: true } },
+                        items: { orderBy: { sortOrder: "asc" } },
+                    },
+                }),
+                prisma.clientPortalToken.count({
+                    where: {
+                        clientId: quote.clientId,
+                        revokedAt: null,
+                        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+                    },
+                }),
+            ]);
+            const totals = calculateQuoteTotals(updated.items, updated.discount, updated.taxRate);
+            await Promise.all([
+                recordAudit({
+                    action: "PUBLISH",
+                    entityType: "Quote",
+                    entityId: updated.id,
+                    summary: `Cotizacion ${updated.number} publicada por Gilberto`,
+                    metadata: { clientId: updated.clientId, projectId: updated.projectId, activePortals },
+                }),
+                notify({
+                    userId: context.userId,
+                    type: "quote",
+                    title: `Cotizacion publicada: ${updated.number}`,
+                    message: `${updated.title} ya es visible en el portal de ${updated.client.company || updated.client.name}.`,
+                    href: "/erp?tab=cotizaciones",
+                    severity: "success",
+                }),
+            ]);
+
+            return {
+                published: true,
+                quote: updated,
+                totals: { ...totals, totalClp: formatClp(totals.total) },
+                activePortals,
+                visibleInPortal: activePortals > 0,
+                proposalUrl: `/cotizaciones/${updated.id}`,
+                erpUrl: "/erp?tab=cotizaciones",
+                instruction: activePortals
+                    ? "Confirma que ya esta visible en el portal existente."
+                    : "La cotizacion quedo Enviada, pero el cliente no tiene un acceso de portal activo.",
+            };
+        },
+    }),
+    actualizarRegistroERP: tool({
+        description:
+            "Actualiza registros existentes del ERP: cotizacion, proyecto, oportunidad, factura, ticket, contrato, aprobacion, orden de compra, activo, remuneracion o automatizacion. Sirve para cambiar estados y campos operativos; una orden directa autoriza cambios reversibles.",
+        inputSchema: z.object({
+            area: z.enum(["cotizacion", "proyecto", "oportunidad", "factura", "ticket", "contrato", "aprobacion", "orden-compra", "activo", "remuneracion", "automatizacion"]),
+            identifier: z.string().default("").describe("ID, numero, titulo o nombre. Para proyecto puede usarse la pagina actual."),
+            status: z.string().max(100).default(""),
+            fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}).describe(
+                "Campos adicionales. Ejemplos: notes, validUntil, agreedAmount, targetDate, priority, assignee, feedback, monthlyAmount, includedHours, active, location o renewalDate.",
+            ),
+        }),
+        execute: async ({ area, identifier, status, fields }) => {
+            const term = identifier.trim();
+            const stringField = (key: string) => typeof fields[key] === "string" ? String(fields[key]).trim() : "";
+            const optionalNumber = (key: string) => typeof fields[key] === "number" ? Number(fields[key]) : undefined;
+            const optionalBoolean = (key: string) => typeof fields[key] === "boolean" ? Boolean(fields[key]) : undefined;
+            const optionalDate = (key: string) => {
+                const value = stringField(key);
+                if (!value) return undefined;
+                const parsed = new Date(value);
+                return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+            };
+            const requireUnique = <T extends { id: string }>(matches: T[], label: string) => {
+                if (matches.length === 1) return { item: matches[0] };
+                if (!matches.length) return { error: `No encontre ${label}.` };
+                return { error: `Encontre varios registros para ${label}. Indica el ID o numero exacto.`, matches };
+            };
+
+            let item: { id: string };
+            let href = "/erp";
+
+            if (area === "cotizacion") {
+                const matches = await prisma.quote.findMany({
+                    where: {
+                        deletedAt: null,
+                        ...(term ? { OR: [{ id: term }, { number: { contains: term, mode: "insensitive" } }, { title: { contains: term, mode: "insensitive" } }] } : {}),
+                    },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la cotizacion");
+                if (!resolved.item) return resolved;
+                const nextStatus = status || undefined;
+                item = await prisma.quote.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        title: stringField("title") || undefined,
+                        status: nextStatus,
+                        validUntil: optionalDate("validUntil"),
+                        terms: fields.terms === null ? null : stringField("terms") || undefined,
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                        sentAt: nextStatus === "Enviada" ? new Date() : undefined,
+                        approvedAt: nextStatus === "Aprobada" ? new Date() : undefined,
+                        rejectedAt: nextStatus === "Rechazada" ? new Date() : undefined,
+                    },
+                });
+                href = `/cotizaciones/${item.id}`;
+            } else if (area === "proyecto") {
+                const projectId = term || context.currentProjectId || "";
+                const matches = await prisma.project.findMany({
+                    where: { deletedAt: null, ...(projectId ? { OR: [{ id: projectId }, { name: { contains: projectId, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "el proyecto");
+                if (!resolved.item) return resolved;
+                item = await prisma.project.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        name: stringField("name") || undefined,
+                        description: fields.description === null ? null : stringField("description") || undefined,
+                        status: status || undefined,
+                        agreedAmount: optionalNumber("agreedAmount"),
+                        budgetHours: optionalNumber("budgetHours"),
+                        budgetCost: optionalNumber("budgetCost"),
+                        startDate: optionalDate("startDate"),
+                        targetDate: optionalDate("targetDate"),
+                    },
+                });
+                href = `/proyectos/${item.id}`;
+            } else if (area === "oportunidad") {
+                const matches = await prisma.opportunity.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { name: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la oportunidad");
+                if (!resolved.item) return resolved;
+                item = await prisma.opportunity.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        stage: status || stringField("stage") || undefined,
+                        value: optionalNumber("value"),
+                        probability: optionalNumber("probability"),
+                        nextAction: fields.nextAction === null ? null : stringField("nextAction") || undefined,
+                        expectedClose: optionalDate("expectedClose"),
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                    },
+                });
+                href = "/erp?tab=crm";
+            } else if (area === "factura") {
+                if (!canUseFinance) return { error: "No tienes permiso para modificar facturas." };
+                const matches = await prisma.invoice.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { number: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la factura");
+                if (!resolved.item) return resolved;
+                item = await prisma.invoice.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        amount: optionalNumber("amount"),
+                        dueDate: optionalDate("dueDate"),
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                        paidAt: status === "Pagado" ? new Date() : undefined,
+                    },
+                });
+                href = "/finanzas";
+            } else if (area === "ticket") {
+                const matches = await prisma.supportTicket.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { number: { contains: term, mode: "insensitive" } }, { subject: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "el ticket");
+                if (!resolved.item) return resolved;
+                item = await prisma.supportTicket.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        priority: stringField("priority") || undefined,
+                        assignee: fields.assignee === null ? null : stringField("assignee") || undefined,
+                        resolvedAt: status === "Resuelto" ? new Date() : undefined,
+                        closedAt: status === "Cerrado" ? new Date() : undefined,
+                    },
+                });
+                href = "/erp?tab=soporte";
+            } else if (area === "contrato") {
+                const matches = await prisma.supportContract.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { name: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "el contrato");
+                if (!resolved.item) return resolved;
+                item = await prisma.supportContract.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        monthlyAmount: optionalNumber("monthlyAmount"),
+                        includedHours: optionalNumber("includedHours"),
+                        responseHours: optionalNumber("responseHours"),
+                        resolutionHours: optionalNumber("resolutionHours"),
+                        endDate: optionalDate("endDate"),
+                        autoRenew: optionalBoolean("autoRenew"),
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                    },
+                });
+                href = "/erp?tab=contratos";
+            } else if (area === "aprobacion") {
+                const matches = await prisma.clientApproval.findMany({
+                    where: term ? { OR: [{ id: term }, { title: { contains: term, mode: "insensitive" } }] } : {},
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la aprobacion");
+                if (!resolved.item) return resolved;
+                item = await prisma.clientApproval.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        feedback: fields.feedback === null ? null : stringField("feedback") || undefined,
+                        decidedAt: status && status !== "Pendiente" ? new Date() : undefined,
+                        decidedBy: status && status !== "Pendiente" ? "PuroCode" : undefined,
+                    },
+                });
+                href = "/erp?tab=aprobaciones";
+            } else if (area === "orden-compra") {
+                if (!canUseFinance) return { error: "No tienes permiso para modificar ordenes de compra." };
+                const matches = await prisma.purchaseOrder.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { number: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la orden de compra");
+                if (!resolved.item) return resolved;
+                item = await prisma.purchaseOrder.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        expectedAt: optionalDate("expectedAt"),
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                        approvedBy: status === "Aprobada" ? "PuroCode" : undefined,
+                        approvedAt: status === "Aprobada" ? new Date() : undefined,
+                        receivedAt: status === "Recibida" ? new Date() : undefined,
+                    },
+                });
+                href = "/erp?tab=compras";
+            } else if (area === "activo") {
+                if (!canUseFinance) return { error: "No tienes permiso para modificar activos." };
+                const matches = await prisma.asset.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { name: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "el activo");
+                if (!resolved.item) return resolved;
+                item = await prisma.asset.update({
+                    where: { id: resolved.item.id },
+                    data: {
+                        status: status || undefined,
+                        location: fields.location === null ? null : stringField("location") || undefined,
+                        renewalDate: optionalDate("renewalDate"),
+                        monthlyCost: optionalNumber("monthlyCost"),
+                        notes: fields.notes === null ? null : stringField("notes") || undefined,
+                    },
+                });
+                href = "/erp?tab=activos";
+            } else if (area === "remuneracion") {
+                if (!canUseFinance) return { error: "No tienes permiso para modificar remuneraciones." };
+                const matches = await prisma.payrollPeriod.findMany({
+                    where: { deletedAt: null, ...(term ? { OR: [{ id: term }, { name: { contains: term, mode: "insensitive" } }] } : {}) },
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "el periodo de remuneraciones");
+                if (!resolved.item) return resolved;
+                item = await prisma.payrollPeriod.update({
+                    where: { id: resolved.item.id },
+                    data: { status: status || undefined, paymentDate: optionalDate("paymentDate") ?? (status === "Pagada" ? new Date() : undefined) },
+                });
+                if (status === "Pagada") await prisma.payrollEntry.updateMany({ where: { periodId: item.id }, data: { status: "Pagado", paidAt: new Date() } });
+                href = "/erp?tab=remuneraciones";
+            } else {
+                const matches = await prisma.automationRule.findMany({
+                    where: term ? { OR: [{ id: term }, { name: { contains: term, mode: "insensitive" } }] } : {},
+                    orderBy: { updatedAt: "desc" },
+                    take: 5,
+                });
+                const resolved = requireUnique(matches, "la automatizacion");
+                if (!resolved.item) return resolved;
+                item = await prisma.automationRule.update({
+                    where: { id: resolved.item.id },
+                    data: { active: optionalBoolean("active"), name: stringField("name") || undefined },
+                });
+                href = "/erp?tab=automatizaciones";
+            }
+
+            await recordAudit({
+                action: "UPDATE",
+                entityType: area,
+                entityId: item.id,
+                summary: `Actualizacion ejecutada por Gilberto en ${area}`,
+                metadata: { status: status || null, fields },
+            });
+            return { updated: true, area, item, href };
+        },
+    }),
+    crearRegistroERP: tool({
+        description:
+            "Crea registros en los modulos que no tienen una herramienta dedicada: contacto, proveedor, contrato, orden de compra, activo, periodo de remuneraciones, automatizacion, asignacion, ausencia o asiento contable. Usa nombres para resolver relaciones o IDs obtenidos con consultarERP.",
+        inputSchema: z.object({
+            area: z.enum(["contacto", "proveedor", "contrato", "orden-compra", "activo", "remuneracion", "automatizacion", "asignacion", "ausencia", "asiento-contable"]),
+            data: z.record(z.string(), z.unknown()).describe(
+                "Datos del registro. Contacto: clientName,name,email,phone,position. Proveedor: name,taxId,email,category. Contrato: clientName,projectName,name,startDate,monthlyAmount. Orden: supplierName,projectName,items[{description,quantity,unitPrice}]. Activo: name,type,vendor,assignedTo. Remuneracion: name,startDate,endDate. Automatizacion: name,trigger,action. Asignacion: projectName,memberName,role,allocation. Ausencia: memberName,startDate,endDate,type. Asiento: date,description,lines[{accountCode,debit,credit}].",
+            ),
+        }),
+        execute: async ({ area, data }) => {
+            const textValue = (key: string) => typeof data[key] === "string" ? String(data[key]).trim() : "";
+            const numberValue = (key: string, fallback = 0) => {
+                const parsed = Number(data[key]);
+                return Number.isFinite(parsed) ? parsed : fallback;
+            };
+            const booleanValue = (key: string, fallback = false) => typeof data[key] === "boolean" ? Boolean(data[key]) : fallback;
+            const dateValue = (key: string, fallback?: Date) => {
+                const raw = textValue(key);
+                if (!raw) return fallback ?? null;
+                const parsed = new Date(raw);
+                return Number.isNaN(parsed.getTime()) ? null : parsed;
+            };
+            const findProject = async () => {
+                const id = textValue("projectId") || context.currentProjectId || "";
+                const name = textValue("projectName");
+                return id || name
+                    ? prisma.project.findFirst({ where: { deletedAt: null, ...(id ? { id } : { name: { contains: name, mode: "insensitive" } }) }, select: { id: true, name: true, clientId: true } })
+                    : null;
+            };
+            const findClient = async () => {
+                const id = textValue("clientId");
+                if (id) return prisma.client.findFirst({ where: { id, deletedAt: null }, select: { id: true, name: true } });
+                const resolved = await resolveClientForTool(textValue("clientName"));
+                return resolved.client ?? null;
+            };
+            const findSupplier = async () => {
+                const id = textValue("supplierId");
+                const name = textValue("supplierName");
+                return id || name
+                    ? prisma.supplier.findFirst({ where: { deletedAt: null, ...(id ? { id } : { name: { contains: name, mode: "insensitive" } }) }, select: { id: true, name: true } })
+                    : null;
+            };
+            const findMember = async () => {
+                const id = textValue("teamMemberId");
+                const name = textValue("memberName") || textValue("assignedTo");
+                return id || name
+                    ? prisma.teamMember.findFirst({ where: { deletedAt: null, ...(id ? { id } : { name: { contains: name, mode: "insensitive" } }) }, select: { id: true, name: true } })
+                    : null;
+            };
+
+            try {
+                let item: { id: string };
+                let href = "/erp";
+
+                if (area === "contacto") {
+                    const client = await findClient();
+                    if (!client || !textValue("name")) return { error: "Necesito cliente y nombre del contacto." };
+                    item = await prisma.contact.create({
+                        data: {
+                            clientId: client.id,
+                            name: textValue("name"),
+                            position: textValue("position") || null,
+                            email: textValue("email") || null,
+                            phone: textValue("phone") || null,
+                            isPrimary: booleanValue("isPrimary"),
+                            notes: textValue("notes") || null,
+                        },
+                    });
+                    href = "/erp?tab=contactos";
+                } else if (area === "proveedor") {
+                    if (!canUseFinance) return { error: "No tienes permiso para crear proveedores." };
+                    if (!textValue("name")) return { error: "Necesito el nombre del proveedor." };
+                    item = await prisma.supplier.create({
+                        data: {
+                            name: textValue("name"),
+                            taxId: textValue("taxId") || null,
+                            email: textValue("email") || null,
+                            phone: textValue("phone") || null,
+                            category: textValue("category") || "Servicios",
+                            notes: textValue("notes") || null,
+                        },
+                    });
+                    href = "/erp?tab=proveedores";
+                } else if (area === "contrato") {
+                    const [client, project] = await Promise.all([findClient(), findProject()]);
+                    const startDate = dateValue("startDate", new Date());
+                    if (!client || !textValue("name") || !startDate) return { error: "Necesito cliente, nombre y fecha de inicio del contrato." };
+                    item = await prisma.supportContract.create({
+                        data: {
+                            clientId: client.id,
+                            projectId: project?.id ?? null,
+                            name: textValue("name"),
+                            status: textValue("status") || "Activo",
+                            billingCycle: textValue("billingCycle") || "Mensual",
+                            monthlyAmount: numberValue("monthlyAmount"),
+                            includedHours: numberValue("includedHours"),
+                            responseHours: numberValue("responseHours", 24),
+                            resolutionHours: numberValue("resolutionHours", 72),
+                            startDate,
+                            endDate: dateValue("endDate"),
+                            autoRenew: booleanValue("autoRenew", true),
+                            nextBillingAt: startDate,
+                            notes: textValue("notes") || null,
+                        },
+                    });
+                    href = "/erp?tab=contratos";
+                } else if (area === "orden-compra") {
+                    if (!canUseFinance) return { error: "No tienes permiso para crear ordenes de compra." };
+                    const [supplier, project] = await Promise.all([findSupplier(), findProject()]);
+                    const lines = Array.isArray(data.items) ? data.items as Array<Record<string, unknown>> : [];
+                    if (!supplier || !lines.length) return { error: "Necesito proveedor y al menos un item." };
+                    item = await prisma.purchaseOrder.create({
+                        data: {
+                            number: textValue("number") || `OC-${new Date().getFullYear()}-${String(await prisma.purchaseOrder.count() + 1).padStart(4, "0")}`,
+                            supplierId: supplier.id,
+                            projectId: project?.id ?? null,
+                            status: textValue("status") || "Borrador",
+                            taxRate: numberValue("taxRate", 19),
+                            expectedAt: dateValue("expectedAt"),
+                            notes: textValue("notes") || null,
+                            items: {
+                                create: lines.map((line) => ({
+                                    description: String(line.description ?? "").trim(),
+                                    quantity: Math.max(.01, Number(line.quantity) || 1),
+                                    unitPrice: Math.max(0, Number(line.unitPrice) || 0),
+                                })),
+                            },
+                        },
+                    });
+                    href = "/erp?tab=compras";
+                } else if (area === "activo") {
+                    if (!canUseFinance) return { error: "No tienes permiso para crear activos." };
+                    const member = await findMember();
+                    if (!textValue("name")) return { error: "Necesito el nombre del activo." };
+                    item = await prisma.asset.create({
+                        data: {
+                            name: textValue("name"),
+                            type: textValue("type") || "Hardware",
+                            category: textValue("category") || "General",
+                            serialNumber: textValue("serialNumber") || null,
+                            vendor: textValue("vendor") || null,
+                            assignedToId: member?.id ?? null,
+                            purchaseDate: dateValue("purchaseDate"),
+                            purchaseCost: numberValue("purchaseCost"),
+                            renewalDate: dateValue("renewalDate"),
+                            monthlyCost: numberValue("monthlyCost"),
+                            status: textValue("status") || (member ? "Asignado" : "Disponible"),
+                            location: textValue("location") || null,
+                            notes: textValue("notes") || null,
+                        },
+                    });
+                    href = "/erp?tab=activos";
+                } else if (area === "remuneracion") {
+                    if (!canUseFinance) return { error: "No tienes permiso para crear remuneraciones." };
+                    const startDate = dateValue("startDate");
+                    const endDate = dateValue("endDate");
+                    if (!textValue("name") || !startDate || !endDate) return { error: "Necesito nombre, inicio y termino del periodo." };
+                    const members = await prisma.teamMember.findMany({ where: { active: true, deletedAt: null } });
+                    item = await prisma.payrollPeriod.create({
+                        data: {
+                            name: textValue("name"),
+                            startDate,
+                            endDate,
+                            paymentDate: dateValue("paymentDate"),
+                            status: textValue("status") || "Borrador",
+                            entries: { create: members.map((member) => ({ teamMemberId: member.id, baseSalary: member.monthlySalary, netPay: member.monthlySalary })) },
+                        },
+                    });
+                    href = "/erp?tab=remuneraciones";
+                } else if (area === "automatizacion") {
+                    if (!textValue("name") || !textValue("trigger") || !textValue("action")) return { error: "Necesito nombre, disparador y accion." };
+                    item = await prisma.automationRule.create({
+                        data: {
+                            name: textValue("name"),
+                            trigger: textValue("trigger"),
+                            action: textValue("action"),
+                            config: data.config && typeof data.config === "object" ? data.config : {},
+                            active: booleanValue("active", true),
+                        },
+                    });
+                    href = "/erp?tab=automatizaciones";
+                } else if (area === "asignacion") {
+                    const [project, member] = await Promise.all([findProject(), findMember()]);
+                    if (!project || !member) return { error: "Necesito proyecto y persona del equipo." };
+                    item = await prisma.projectAssignment.upsert({
+                        where: { projectId_teamMemberId: { projectId: project.id, teamMemberId: member.id } },
+                        update: { role: textValue("role") || "Miembro", allocation: numberValue("allocation", 100), startDate: dateValue("startDate"), endDate: dateValue("endDate") },
+                        create: { projectId: project.id, teamMemberId: member.id, role: textValue("role") || "Miembro", allocation: numberValue("allocation", 100), startDate: dateValue("startDate"), endDate: dateValue("endDate") },
+                    });
+                    href = "/erp?tab=asignaciones";
+                } else if (area === "ausencia") {
+                    const member = await findMember();
+                    const startDate = dateValue("startDate");
+                    const endDate = dateValue("endDate");
+                    if (!member || !startDate || !endDate) return { error: "Necesito persona, inicio y termino de la ausencia." };
+                    item = await prisma.teamAbsence.create({
+                        data: { teamMemberId: member.id, type: textValue("type") || "Vacaciones", startDate, endDate, notes: textValue("notes") || null },
+                    });
+                    href = "/erp?tab=ausencias";
+                } else {
+                    if (!canUseFinance) return { error: "No tienes permiso para crear asientos contables." };
+                    const entryDate = dateValue("date", new Date());
+                    const rawLines = Array.isArray(data.lines) ? data.lines as Array<Record<string, unknown>> : [];
+                    const accountCodes = rawLines.map((line) => String(line.accountCode ?? "").trim()).filter(Boolean);
+                    const accounts = await prisma.account.findMany({ where: { code: { in: accountCodes }, active: true } });
+                    const lines = rawLines.map((line) => {
+                        const account = accounts.find((entry) => entry.code === String(line.accountCode ?? "").trim());
+                        return { accountId: account?.id ?? "", description: String(line.description ?? "").trim() || null, debit: Number(line.debit) || 0, credit: Number(line.credit) || 0 };
+                    });
+                    const debit = lines.reduce((sum, line) => sum + line.debit, 0);
+                    const credit = lines.reduce((sum, line) => sum + line.credit, 0);
+                    if (!entryDate || lines.length < 2 || lines.some((line) => !line.accountId) || Math.abs(debit - credit) > .001) {
+                        return { error: "El asiento requiere fecha, al menos dos cuentas validas y debe estar balanceado." };
+                    }
+                    item = await prisma.journalEntry.create({
+                        data: {
+                            number: textValue("number") || `ASI-${new Date().getFullYear()}-${String(await prisma.journalEntry.count() + 1).padStart(4, "0")}`,
+                            date: entryDate,
+                            description: textValue("description"),
+                            reference: textValue("reference") || null,
+                            createdBy: context.userId,
+                            status: textValue("status") || "Borrador",
+                            lines: { create: lines },
+                        },
+                    });
+                    href = "/erp?tab=contabilidad";
+                }
+
+                await recordAudit({
+                    action: "CREATE",
+                    entityType: area,
+                    entityId: item.id,
+                    summary: `Registro creado por Gilberto en ${area}`,
+                });
+                return { created: true, area, item, href };
+            } catch (error) {
+                return { error: error instanceof Error ? error.message : "No se pudo crear el registro." };
+            }
+        },
+    }),
     crearAprobacionCliente: tool({
         description:
             "Crea una solicitud de aprobacion visible en el portal del cliente para un proyecto. Una orden directa del usuario autoriza crearla sin otra confirmacion.",

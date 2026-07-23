@@ -230,10 +230,28 @@ model UserProfile {
   authTokens        AuthToken[]
   passkeys          Passkey[]
   emailMessages     EmailMessage[]
+  pushSubscriptions PushSubscription[]
 
   @@index([email])
   @@index([role, active])
   @@map("user_profiles")
+}
+
+model PushSubscription {
+  id         String      @id @default(uuid())
+  userId     String      @map("user_id")
+  user       UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  endpoint   String      @unique
+  p256dh     String
+  auth       String
+  userAgent  String?     @map("user_agent")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+  lastUsedAt DateTime?   @map("last_used_at")
+
+  @@index([userId])
+  @@index([updatedAt])
+  @@map("push_subscriptions")
 }
 
 model EmailMessage {

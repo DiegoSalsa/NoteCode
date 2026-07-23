@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, BadgeDollarSign, Bell, BookOpenCheck, Box, BriefcaseBusiness, Building2, CheckCircle2,
   ChevronRight, CircleDollarSign, Clock3, FileCheck2, FileSignature, Gauge,
@@ -80,6 +80,7 @@ const modules: Module[] = [
     id: "cotizaciones", label: "Cotizaciones", resource: "quotes", description: "Propuestas, aprobaciones y conversión a proyecto.", icon: FileSignature,
     fields: [
       { key: "clientId", label: "Cliente", type: "select", source: "clients", required: true },
+      { key: "projectId", label: "Proyecto", type: "select", source: "projects" },
       { key: "opportunityId", label: "Oportunidad", type: "select", source: "opportunities" },
       { key: "title", label: "Título", required: true }, { key: "validUntil", label: "Válida hasta", type: "date" },
       { key: "taxRate", label: "IVA (%)", type: "number", defaultValue: 19 }, { key: "discount", label: "Descuento (%)", type: "number", defaultValue: 0 },
@@ -282,6 +283,9 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [generatedPortal, setGeneratedPortal] = useState("");
+  const dataCache = useRef(new Map<string, { savedAt: number; data: Item[] | Record<string, number> }>());
+  const optionsCache = useRef<{ savedAt: number; data: Options } | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
 
   const module = modules.find((entry) => entry.id === tab);
   const visibleModules = useMemo(() => modules.filter((entry) => {
@@ -292,48 +296,88 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
     return true;
   }), [currentUser.role]);
 
-  const loadOptions = useCallback(async () => {
+  const loadOptions = useCallback(async (force = false) => {
+    if (!force && optionsCache.current && Date.now() - optionsCache.current.savedAt < 120_000) {
+      setOptions(optionsCache.current.data);
+      return;
+    }
     const response = await fetch("/api/erp/options");
-    if (response.ok) setOptions(await response.json());
+    if (response.ok) {
+      const data = await response.json() as Options;
+      optionsCache.current = { savedAt: Date.now(), data };
+      setOptions(data);
+    }
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    const cacheKey = `${tab}:${query.trim().toLowerCase()}`;
+    const cached = dataCache.current.get(cacheKey);
+    if (!force && cached && Date.now() - cached.savedAt < 30_000) {
+      if (tab === "resumen") setOverview(cached.data as Record<string, number>);
+      else setItems(cached.data as Item[]);
+      setLoading(false);
+      return;
+    }
+
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true);
     setError("");
     try {
       if (tab === "resumen") {
-        const response = await fetch("/api/erp/overview");
+        const response = await fetch("/api/erp/overview", { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         setOverview(data);
         setItems([]);
+        dataCache.current.set(cacheKey, { savedAt: Date.now(), data });
       } else if (tab === "portal") {
-        const response = await fetch(`/api/erp/clients?q=${encodeURIComponent(query)}`);
+        const response = await fetch(`/api/erp/clients?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         setItems(data);
+        dataCache.current.set(cacheKey, { savedAt: Date.now(), data });
       } else if (module) {
-        const response = await fetch(`/api/erp/${module.resource}?q=${encodeURIComponent(query)}`);
+        const response = await fetch(`/api/erp/${module.resource}?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
-        setItems(Array.isArray(data) ? data : []);
+        const nextItems = Array.isArray(data) ? data : [];
+        setItems(nextItems);
+        dataCache.current.set(cacheKey, { savedAt: Date.now(), data: nextItems });
       }
     } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
       setError(caught instanceof Error ? caught.message : "No se pudieron cargar los datos.");
     } finally {
-      setLoading(false);
+      if (activeRequest.current === controller) setLoading(false);
     }
   }, [module, query, tab]);
 
-  useEffect(() => { void loadOptions(); }, [loadOptions]);
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
     if (requestedTab && (modules.some((entry) => entry.id === requestedTab) || requestedTab === "portal")) setTab(requestedTab);
+    const onHistory = () => {
+      const nextTab = new URLSearchParams(window.location.search).get("tab") || "resumen";
+      if (modules.some((entry) => entry.id === nextTab) || nextTab === "portal" || nextTab === "resumen") setTab(nextTab);
+    };
+    window.addEventListener("popstate", onHistory);
+    return () => window.removeEventListener("popstate", onHistory);
   }, []);
   useEffect(() => { void load(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function openCreate() {
+  function selectTab(nextTab: string) {
+    setQuery("");
+    setTab(nextTab);
+    const url = new URL(window.location.href);
+    if (nextTab === "resumen") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", nextTab);
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  async function openCreate() {
     if (!module) return;
+    if (module.fields.some((field) => field.source)) await loadOptions();
     const initial: Record<string, string | number | boolean> = {};
     for (const field of module.fields) {
       if (field.defaultValue !== undefined) initial[field.key] = field.defaultValue;
@@ -365,7 +409,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       setModal(false);
-      await Promise.all([load(), loadOptions()]);
+      dataCache.current.clear();
+      await Promise.all([load(true), loadOptions(true)]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo guardar.");
     } finally {
@@ -383,7 +428,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       setError(data.error ?? "No se pudo actualizar.");
       return;
     }
-    await Promise.all([load(), loadOptions()]);
+    dataCache.current.clear();
+    await Promise.all([load(true), loadOptions(true)]);
   }
 
   async function remove(resource: string, id: string) {
@@ -394,7 +440,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       setError(data.error ?? "No se pudo eliminar.");
       return;
     }
-    await load();
+    dataCache.current.clear();
+    await load(true);
   }
 
   async function createPortal(clientId: string) {
@@ -427,7 +474,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       setError(data.error ?? "No se pudo registrar la actividad.");
       return;
     }
-    await load();
+    dataCache.current.clear();
+    await load(true);
   }
 
   async function addTicketComment(ticketId: string) {
@@ -442,7 +490,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       setError(data.error ?? "No se pudo responder.");
       return;
     }
-    await load();
+    dataCache.current.clear();
+    await load(true);
   }
 
   const filtered = useMemo(() => {
@@ -470,17 +519,17 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
         </div>
       </header>
 
-      <div className="mt-5 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        <button onClick={() => setTab("resumen")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "resumen" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
+      <div className="mt-5 flex gap-2 overflow-x-auto pb-2 scrollbar-hide lg:flex-wrap lg:overflow-visible lg:pb-0">
+        <button onClick={() => selectTab("resumen")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "resumen" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
           <LayoutGrid size={14} /> Resumen
         </button>
-        <button onClick={() => setTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
+        <button onClick={() => selectTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
           <ShieldCheck size={14} /> Portal clientes
         </button>
         {visibleModules.map((entry) => {
           const Icon = entry.icon;
           return (
-            <button key={entry.id} onClick={() => setTab(entry.id)} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === entry.id ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400 hover:text-neutral-200"}`}>
+            <button key={entry.id} onClick={() => selectTab(entry.id)} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === entry.id ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400 hover:text-neutral-200"}`}>
               <Icon size={14} /> {entry.label}
             </button>
           );
@@ -504,7 +553,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
                 <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void load()} placeholder="Buscar..." className="w-full rounded-lg border border-white/10 bg-neutral-900 py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-white/20" />
               </div>
               {module && module.fields.length > 0 && (
-                <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-neutral-950">
+                <button onClick={() => void openCreate()} className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-neutral-950">
                   <Plus size={14} /> Nuevo
                 </button>
               )}

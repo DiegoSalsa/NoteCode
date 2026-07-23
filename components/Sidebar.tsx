@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Bot,
@@ -45,6 +45,7 @@ type Me = {
 
 export default function Sidebar({ me }: { me: Me | null }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const visibleNavItems = navItems.filter((item) => !("roles" in item) || !item.roles || item.roles.includes(me?.role ?? "MEMBER"));
   const visibleMobilePrimaryItems = visibleNavItems.slice(0, 4);
@@ -56,6 +57,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
   }
 
   function prefetchItem(item: (typeof navItems)[number]) {
+    router.prefetch(item.href);
     if (item.cacheKey && item.api) {
       prefetchJson(item.cacheKey, item.api);
     }
@@ -81,6 +83,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               onMouseEnter={() => prefetchItem(item)}
               onTouchStart={() => prefetchItem(item)}
               className={`group flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
@@ -103,6 +106,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
       <div className="mt-auto space-y-3 border-t border-white/10 px-5 py-4">
         <Link
           href="/perfil"
+          prefetch={false}
           className="flex items-center gap-3 rounded-lg border border-white/10 bg-neutral-900 px-3 py-3 transition-colors hover:bg-neutral-800/80"
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-[12px] font-bold text-neutral-950">
@@ -151,6 +155,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 onClick={() => setMoreOpen(false)}
                 onTouchStart={() => prefetchItem(item)}
                 className={`flex items-center gap-2.5 rounded-md px-3 py-3 text-[12px] font-medium transition-colors ${
@@ -178,6 +183,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               onClick={() => setMoreOpen(false)}
               onTouchStart={() => prefetchItem(item)}
               className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-medium transition-colors ${

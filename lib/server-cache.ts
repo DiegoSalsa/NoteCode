@@ -9,9 +9,7 @@ const globalForCache = globalThis as unknown as {
 
 const cache = globalForCache.notecodeCache ?? new Map<string, CacheEntry<unknown>>();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForCache.notecodeCache = cache;
-}
+globalForCache.notecodeCache = cache;
 
 export async function cached<T>(
   key: string,

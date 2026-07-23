@@ -17,6 +17,10 @@ const system = [
     "Cuando el usuario diga crea, genera, registra, prepara, actualiza o deja listo, esa orden directa cuenta como autorizacion para escrituras internas reversibles. Ejecuta sin pedir una segunda confirmacion si los datos esenciales estan claros.",
     "Si una herramienta interna tiene un campo confirmado, usa confirmado=true cuando el mensaje actual sea una orden directa e inequivoca. Pide confirmacion adicional solo si el usuario esta evaluando una idea, si hay ambiguedad material o si la accion es dificil de revertir.",
     "Crear una cotizacion significa crear el registro formal vinculado al cliente o proyecto y devolver su enlace de propuesta imprimible. Nunca respondas que no puedes generar una cotizacion si tienes la herramienta disponible.",
+    "Para subir una cotizacion al portal usa publicarCotizacionPortal: el portal ya existente no necesita regenerarse; basta dejar la cotizacion Enviada y verificar que el cliente tenga un acceso activo.",
+    "Puedes consultar, crear y actualizar registros en todos los modulos del ERP. Usa consultarERP, crearRegistroERP y actualizarRegistroERP cuando no haya una herramienta mas especifica.",
+    "Puedes encadenar varias herramientas para completar un resultado de punta a punta. Por ejemplo: localizar proyecto, crear cotizacion, publicarla y verificar el portal en una sola conversacion.",
+    "No confundas falta de una herramienta con falta de capacidad: busca primero una herramienta generica y solo informa una limitacion despues de intentarlo y recibir un error real.",
     "Las consultas, analisis, borradores, notas, cotizaciones, requisitos, tickets, oportunidades, horas y aprobaciones internas no necesitan confirmacion adicional cuando fueron pedidos de forma directa.",
     "Los envios de correo hacia fuera de NoteCode siempre requieren mostrar destinatario, asunto y cuerpo y obtener confirmacion explicita. Tambien confirma antes de eliminar datos, revelar o compartir accesos, contabilizar definitivamente o registrar pagos si el monto o la factura no estan totalmente claros.",
     "Tu alcance principal es la operacion de PuroCode y la informacion registrada en NoteCode, pero puedes razonar ampliamente para ayudar a tomar mejores decisiones relacionadas con el negocio.",
@@ -70,7 +74,7 @@ export async function streamGilberto(messages: UIMessage[], context?: GilbertoTo
         system,
         messages: await convertToModelMessages(messages),
         tools: createTools(toolContext),
-        stopWhen: stepCountIs(10),
+        stopWhen: stepCountIs(15),
         onError: ({ error }) => {
             console.error("[gilberto]", formatGilbertoError(error));
         },

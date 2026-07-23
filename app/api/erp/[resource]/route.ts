@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canManageFinance, getCurrentUser } from "@/lib/auth";
 import { notify, recordAudit } from "@/lib/audit";
 import { encryptString } from "@/lib/crypto";
+import { cached, invalidateCache } from "@/lib/server-cache";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -52,69 +53,75 @@ export async function GET(
   try {
     switch (resource) {
       case "overview": {
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const [
-          opportunities,
-          activeProjects,
-          openTickets,
-          overdueInvoices,
-          pipeline,
-          invoices,
-          payments,
-          expenses,
-          hours,
-          team,
-          pendingApprovals,
-        ] = await Promise.all([
-          prisma.opportunity.count({ where: { deletedAt: null, stage: { notIn: ["Ganado", "Perdido"] } } }),
-          prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
-          prisma.supportTicket.count({ where: { deletedAt: null, status: { notIn: ["Resuelto", "Cerrado"] } } }),
-          prisma.invoice.count({ where: { deletedAt: null, status: { in: ["Pendiente", "Vencido"] }, dueDate: { lt: now } } }),
-          prisma.opportunity.aggregate({
-            where: { deletedAt: null, stage: { notIn: ["Ganado", "Perdido"] } },
-            _sum: { value: true },
-          }),
-          prisma.invoice.aggregate({
-            where: { deletedAt: null, issuedAt: { gte: monthStart }, status: { not: "Cancelado" } },
-            _sum: { amount: true },
-          }),
-          prisma.payment.aggregate({ where: { paidAt: { gte: monthStart } }, _sum: { amount: true } }),
-          prisma.expense.aggregate({ where: { deletedAt: null, date: { gte: monthStart } }, _sum: { amount: true } }),
-          prisma.timeEntry.aggregate({ where: { date: { gte: monthStart } }, _sum: { hours: true } }),
-          prisma.teamMember.findMany({
-            where: { active: true, deletedAt: null },
-            select: { id: true, name: true, weeklyCapacity: true, hourlyCost: true },
-          }),
-          prisma.clientApproval.count({ where: { status: "Pendiente" } }),
-        ]);
-        return NextResponse.json({
-          opportunities,
-          activeProjects,
-          openTickets,
-          overdueInvoices,
-          pendingApprovals,
-          pipelineValue: pipeline._sum.value ?? 0,
-          invoicedThisMonth: invoices._sum.amount ?? 0,
-          collectedThisMonth: payments._sum.amount ?? 0,
-          expensesThisMonth: expenses._sum.amount ?? 0,
-          hoursThisMonth: hours._sum.hours ?? 0,
-          activeTeam: team.length,
-          grossCashFlow: (payments._sum.amount ?? 0) - (expenses._sum.amount ?? 0),
+        const overview = await cached("erp:overview", 30_000, async () => {
+          const now = new Date();
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          const [
+            opportunities,
+            activeProjects,
+            openTickets,
+            overdueInvoices,
+            pipeline,
+            invoices,
+            payments,
+            expenses,
+            hours,
+            team,
+            pendingApprovals,
+          ] = await Promise.all([
+            prisma.opportunity.count({ where: { deletedAt: null, stage: { notIn: ["Ganado", "Perdido"] } } }),
+            prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
+            prisma.supportTicket.count({ where: { deletedAt: null, status: { notIn: ["Resuelto", "Cerrado"] } } }),
+            prisma.invoice.count({ where: { deletedAt: null, status: { in: ["Pendiente", "Vencido"] }, dueDate: { lt: now } } }),
+            prisma.opportunity.aggregate({
+              where: { deletedAt: null, stage: { notIn: ["Ganado", "Perdido"] } },
+              _sum: { value: true },
+            }),
+            prisma.invoice.aggregate({
+              where: { deletedAt: null, issuedAt: { gte: monthStart }, status: { not: "Cancelado" } },
+              _sum: { amount: true },
+            }),
+            prisma.payment.aggregate({ where: { paidAt: { gte: monthStart } }, _sum: { amount: true } }),
+            prisma.expense.aggregate({ where: { deletedAt: null, date: { gte: monthStart } }, _sum: { amount: true } }),
+            prisma.timeEntry.aggregate({ where: { date: { gte: monthStart } }, _sum: { hours: true } }),
+            prisma.teamMember.findMany({
+              where: { active: true, deletedAt: null },
+              select: { id: true, name: true, weeklyCapacity: true, hourlyCost: true },
+            }),
+            prisma.clientApproval.count({ where: { status: "Pendiente" } }),
+          ]);
+          return {
+            opportunities,
+            activeProjects,
+            openTickets,
+            overdueInvoices,
+            pendingApprovals,
+            pipelineValue: pipeline._sum.value ?? 0,
+            invoicedThisMonth: invoices._sum.amount ?? 0,
+            collectedThisMonth: payments._sum.amount ?? 0,
+            expensesThisMonth: expenses._sum.amount ?? 0,
+            hoursThisMonth: hours._sum.hours ?? 0,
+            activeTeam: team.length,
+            grossCashFlow: (payments._sum.amount ?? 0) - (expenses._sum.amount ?? 0),
+          };
         });
+        return NextResponse.json(overview);
       }
       case "options": {
-        const [clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods] = await Promise.all([
-          prisma.client.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, company: true } }),
-          prisma.project.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, clientId: true } }),
-          prisma.teamMember.findMany({ where: { deletedAt: null, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-          prisma.supplier.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
-          prisma.invoice.findMany({ where: { deletedAt: null }, orderBy: { createdAt: "desc" }, select: { id: true, number: true, client: true, amount: true, status: true } }),
-          prisma.opportunity.findMany({ where: { deletedAt: null }, orderBy: { updatedAt: "desc" }, select: { id: true, name: true } }),
-          prisma.account.findMany({ where: { active: true }, orderBy: { code: "asc" }, select: { id: true, name: true, code: true } }),
-          prisma.payrollPeriod.findMany({ where: { deletedAt: null }, orderBy: { startDate: "desc" }, select: { id: true, name: true } }),
-        ]);
-        return NextResponse.json({ clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods });
+        const options = await cached("erp:options", 120_000, async () => {
+          const [clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods] = await Promise.all([
+            prisma.client.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true, company: true } }),
+            prisma.project.findMany({ where: { deletedAt: null }, orderBy: { updatedAt: "desc" }, take: 300, select: { id: true, name: true, clientId: true } }),
+            prisma.teamMember.findMany({ where: { deletedAt: null, active: true }, orderBy: { name: "asc" }, take: 200, select: { id: true, name: true } }),
+            prisma.supplier.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true } }),
+            prisma.invoice.findMany({ where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 300, select: { id: true, number: true, client: true, amount: true, status: true } }),
+            prisma.opportunity.findMany({ where: { deletedAt: null }, orderBy: { updatedAt: "desc" }, take: 300, select: { id: true, name: true } }),
+            prisma.account.findMany({ where: { active: true }, orderBy: { code: "asc" }, take: 300, select: { id: true, name: true, code: true } }),
+            prisma.payrollPeriod.findMany({ where: { deletedAt: null }, orderBy: { startDate: "desc" }, take: 120, select: { id: true, name: true } }),
+          ]);
+          return { clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods };
+        });
+        return NextResponse.json(options);
       }
       case "clients":
         return NextResponse.json(await prisma.client.findMany({
@@ -498,6 +505,7 @@ export async function POST(
           expiresAt: date(body.expiresAt),
         } });
         await recordAudit({ action: "CREATE", entityType: "ClientPortalToken", entityId: created.id, summary: "Acceso de portal creado" });
+        invalidateCache("erp:");
         return NextResponse.json({ ...created, token: rawToken, portalUrl: `/portal/${rawToken}` }, { status: 201 });
       }
       case "automations": {
@@ -575,6 +583,7 @@ export async function POST(
     }
 
     await recordAudit({ action: "CREATE", entityType: resource, entityId: item.id, summary: `Creación en ${resource}` });
+    invalidateCache("erp:");
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
     console.error(`[erp:${resource}:post]`, error);
