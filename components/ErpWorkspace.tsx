@@ -474,6 +474,9 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
         <button onClick={() => setTab("resumen")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "resumen" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
           <LayoutGrid size={14} /> Resumen
         </button>
+        <button onClick={() => setTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
+          <ShieldCheck size={14} /> Portal clientes
+        </button>
         {visibleModules.map((entry) => {
           const Icon = entry.icon;
           return (
@@ -482,9 +485,6 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
             </button>
           );
         })}
-        <button onClick={() => setTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
-          <ShieldCheck size={14} /> Portal
-        </button>
       </div>
 
       {error && <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
