@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Eye, EyeOff, Plus, Search, Trash2, X } from "lucide-react";
 import { revealCredential } from "@/app/actions/credentials";
-import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 import { useDebounce } from "@/lib/use-debounce";
 
@@ -39,7 +39,7 @@ function asArray<T>(value: unknown): T[] {
 }
 
 export default function BovedaPage() {
-  const cached = readCachedJson<Partial<VaultPayload>>("vault::0:50");
+  const cached = useCachedJson<Partial<VaultPayload>>("vault::0:50");
   const [credentials, setCredentials] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
   const [projects, setProjects] = useState<Project[]>(() => asArray<Project>(cached?.projects));
   const [loading, setLoading] = useState(!cached);
@@ -53,6 +53,17 @@ export default function BovedaPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ projectId: "", scope: "company", name: "", username: "", password: "" });
+
+  useEffect(() => {
+    if (!cached) return;
+    const cachedCredentials = asArray<Credential>(cached.credentials);
+    setCredentials(cachedCredentials);
+    setProjects(asArray<Project>(cached.projects));
+    setNextSkip(cached.nextSkip ?? cachedCredentials.length);
+    setHasMore(Boolean(cached.hasMore));
+    setTotal(cached.total ?? cachedCredentials.length);
+    setLoading(false);
+  }, [cached]);
 
   const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
     const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "50" });
@@ -72,8 +83,10 @@ export default function BovedaPage() {
   }, [debouncedSearch]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchData();
+    if (!credentials.length) setLoading(true);
+    void fetchData();
+    // Keep cached rows visible while they are revalidated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchData]);
 
   async function loadMore() {

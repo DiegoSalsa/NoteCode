@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { Prisma } from "@prisma/client";
 import { tool } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,8 @@ import { notify, recordAudit } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { invalidateCache } from "@/lib/server-cache";
+import { periodForPreviousMonth } from "@/lib/tax/f29";
+import { buildF29Snapshot } from "@/lib/tax/f29-service";
 
 function formatClp(value: number) {
     return new Intl.NumberFormat("es-CL", {
@@ -15,12 +18,39 @@ function formatClp(value: number) {
     }).format(Math.round(value));
 }
 
-function confirmationRequired(action: string, details: Record<string, unknown>) {
+async function confirmationRequired(context: GilbertoToolContext, action: string, details: Record<string, unknown>) {
+    let actionId: string | null = null;
+    if (context.userId) {
+        const idempotencyKey = `approval:${createHash("sha256")
+            .update(`${context.userId}:${new Date().toISOString().slice(0, 10)}:${action}:${JSON.stringify(details)}`)
+            .digest("hex")}`;
+        const thread = context.threadId
+            ? await prisma.assistantThread.findFirst({ where: { id: context.threadId, userId: context.userId }, select: { id: true } })
+            : null;
+        const queued = await prisma.assistantAction.upsert({
+            where: { idempotencyKey },
+            create: {
+                userId: context.userId,
+                threadId: thread?.id ?? null,
+                type: action,
+                title: action.replace(/([a-z])([A-Z])/g, "$1 $2"),
+                description: "Acción preparada por Gilberto a la espera de aprobación.",
+                payload: details as Prisma.InputJsonValue,
+                riskLevel: action === "enviarCorreo" || action === "registrarPago" ? "high" : "medium",
+                requiresApproval: true,
+                idempotencyKey,
+            },
+            update: {},
+        });
+        actionId = queued.id;
+    }
+
     return {
         requiresConfirmation: true,
         action,
+        actionId,
         details,
-        message: "Necesito confirmacion antes de ejecutar esta accion. Responde con 'confirmo' si esta correcto.",
+        message: "La acción quedó preparada y auditada. Puedes aprobarla desde Hoy o responder 'confirmo' para ejecutarla.",
     };
 }
 
@@ -51,6 +81,7 @@ function calculateQuoteTotals(
 export type GilbertoToolContext = {
     pathname?: string;
     currentProjectId?: string | null;
+    threadId?: string | null;
     userId?: string | null;
     role?: string | null;
 };
@@ -256,6 +287,234 @@ export function createTools(context: GilbertoToolContext = {}) {
                 pendingInvoiceCount: pending._count,
                 overdueInvoiceCount: overdue._count,
             };
+        },
+    }),
+    getF29Chile: tool({
+        description:
+            "Calcula y concilia el Formulario 29 chileno de un periodo AAAA-MM. Devuelve IVA débito/crédito, PPM, total estimado, vencimiento, brechas de respaldo y, si existe, el F29 oficial declarado. Úsala para cualquier pregunta sobre impuestos, IVA, PPM o cuánto pagar de F29.",
+        inputSchema: z.object({
+            periodo: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional()
+                .describe("Periodo tributario AAAA-MM. Si se omite usa el mes anterior."),
+        }),
+        execute: async ({ periodo }) => {
+            if (!canUseFinance) return { error: "No tienes permiso para consultar impuestos." };
+            const result = await buildF29Snapshot(periodo ?? periodForPreviousMonth());
+            return {
+                period: result.period,
+                estimate: {
+                    total: result.estimatedTotal,
+                    totalClp: formatClp(result.estimatedTotal),
+                    vatPayable: result.vatPayable,
+                    vatPayableClp: formatClp(result.vatPayable),
+                    ppmAmount: result.ppmAmount,
+                    ppmAmountClp: formatClp(result.ppmAmount),
+                    ppmRate: result.ppmRate,
+                    dueDateChile: result.dueDateChile,
+                },
+                officialF29: result.officialF29
+                    ? {
+                        ...result.officialF29,
+                        totalClp: formatClp(result.officialF29.total),
+                        debitVatClp: formatClp(result.officialF29.debitVat),
+                        ppmAmountClp: formatClp(result.officialF29.ppmAmount),
+                        varianceClp: formatClp(result.officialF29.variance),
+                    }
+                    : null,
+                confidence: result.confidence,
+                gaps: result.gaps,
+                sources: result.sources,
+                company: result.profile
+                    ? {
+                        rut: result.profile.rut,
+                        legalName: result.profile.legalName,
+                        taxRegime: result.profile.taxRegime,
+                        ppmRateConfirmed: result.profile.ppmRateConfirmed,
+                    }
+                    : null,
+                disclaimer: result.disclaimer,
+            };
+        },
+    }),
+    consultarMemoriaPersonal: tool({
+        description:
+            "Consulta preferencias y datos personales no sensibles que el usuario pidió recordar. Úsala cuando necesites confirmar una preferencia persistente.",
+        inputSchema: z.object({
+            categoria: z.enum(["preferencia", "persona", "trabajo", "rutina", "contexto"]).optional(),
+        }),
+        execute: async ({ categoria }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            const memories = await prisma.assistantMemory.findMany({
+                where: {
+                    userId: context.userId,
+                    ...(categoria ? { category: categoria } : {}),
+                    OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+                },
+                orderBy: [{ confidence: "desc" }, { updatedAt: "desc" }],
+                take: 30,
+                select: { key: true, value: true, category: true, confirmedAt: true },
+            });
+            return memories;
+        },
+    }),
+    guardarMemoriaPersonal: tool({
+        description:
+            "Guarda una preferencia o dato personal no sensible cuando el usuario pide explícitamente recordarlo. Nunca guarda contraseñas, API keys, tokens ni credenciales.",
+        inputSchema: z.object({
+            clave: z.string().min(2).max(80).describe("Nombre corto y estable, por ejemplo formato_reportes."),
+            valor: z.string().min(1).max(1000),
+            categoria: z.enum(["preferencia", "persona", "trabajo", "rutina", "contexto"]).default("preferencia"),
+        }),
+        execute: async ({ clave, valor, categoria }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            if (/(contrase|password|api.?key|token|secreto|credencial)/i.test(`${clave} ${valor}`)) {
+                return { error: "No puedo guardar secretos ni credenciales en la memoria personal." };
+            }
+            const key = clave.trim().toLowerCase().replace(/[^a-z0-9áéíóúñ_-]+/gi, "_").slice(0, 80);
+            const memory = await prisma.assistantMemory.upsert({
+                where: { userId_key: { userId: context.userId, key } },
+                create: {
+                    userId: context.userId,
+                    key,
+                    value: valor.trim(),
+                    category: categoria,
+                    source: "usuario",
+                    confidence: 1,
+                    confirmedAt: new Date(),
+                },
+                update: {
+                    value: valor.trim(),
+                    category: categoria,
+                    source: "usuario",
+                    confidence: 1,
+                    confirmedAt: new Date(),
+                    expiresAt: null,
+                },
+            });
+            await recordAudit({
+                action: "UPSERT",
+                entityType: "AssistantMemory",
+                entityId: memory.id,
+                summary: `Gilberto recordó ${key}`,
+                metadata: { category: categoria },
+            });
+            return { saved: true, key: memory.key, value: memory.value, category: memory.category };
+        },
+    }),
+    olvidarMemoriaPersonal: tool({
+        description:
+            "Desactiva una memoria personal cuando el usuario pide explícitamente olvidarla. La conserva en auditoría, pero deja de usarla inmediatamente.",
+        inputSchema: z.object({ clave: z.string().min(2).max(80) }),
+        execute: async ({ clave }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            const memory = await prisma.assistantMemory.findUnique({
+                where: { userId_key: { userId: context.userId, key: clave.trim().toLowerCase() } },
+            });
+            if (!memory) return { error: "No encontré esa memoria." };
+            await prisma.assistantMemory.update({
+                where: { id: memory.id },
+                data: { expiresAt: new Date(), confidence: 0 },
+            });
+            await recordAudit({
+                action: "EXPIRE",
+                entityType: "AssistantMemory",
+                entityId: memory.id,
+                summary: `Gilberto dejó de usar ${memory.key}`,
+            });
+            return { forgotten: true, key: memory.key };
+        },
+    }),
+    prepararAccionGilberto: tool({
+        description:
+            "Crea una acción durable y auditada sin ejecutarla. Úsala cuando el usuario pida dejar algo en cola, pendiente de aprobación o para ejecutar más tarde.",
+        inputSchema: z.object({
+            tipo: z.string().min(2).max(80),
+            titulo: z.string().min(2).max(200),
+            descripcion: z.string().min(1).max(1000),
+            riesgo: z.enum(["low", "medium", "high"]).default("medium"),
+            detalles: z.record(z.string(), z.string()).default({}),
+            requiereAprobacion: z.boolean().default(true),
+        }),
+        execute: async ({ tipo, titulo, descripcion, riesgo, detalles, requiereAprobacion }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            const thread = context.threadId
+                ? await prisma.assistantThread.findFirst({ where: { id: context.threadId, userId: context.userId }, select: { id: true } })
+                : null;
+            const action = await prisma.assistantAction.create({
+                data: {
+                    userId: context.userId,
+                    threadId: thread?.id ?? null,
+                    type: tipo,
+                    title: titulo,
+                    description: descripcion,
+                    payload: detalles,
+                    riskLevel: riesgo,
+                    requiresApproval: requiereAprobacion,
+                    status: requiereAprobacion ? "pending" : "approved",
+                    approvedAt: requiereAprobacion ? null : new Date(),
+                    idempotencyKey: `queued:${randomBytes(16).toString("hex")}`,
+                },
+            });
+            await recordAudit({
+                action: "QUEUE",
+                entityType: "AssistantAction",
+                entityId: action.id,
+                summary: titulo,
+                metadata: { type: tipo, riskLevel: riesgo, requiresApproval: requiereAprobacion },
+            });
+            return {
+                queued: true,
+                actionId: action.id,
+                status: action.status,
+                title: action.title,
+                message: requiereAprobacion ? "La acción quedó pendiente de aprobación en Hoy." : "La acción quedó aprobada y lista para ejecutar.",
+            };
+        },
+    }),
+    consultarAccionesGilberto: tool({
+        description: "Lista acciones preparadas, pendientes de aprobación o ya aprobadas para el usuario actual.",
+        inputSchema: z.object({ estado: z.enum(["pending", "approved", "failed", "all"]).default("all") }),
+        execute: async ({ estado }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            return prisma.assistantAction.findMany({
+                where: {
+                    userId: context.userId,
+                    ...(estado === "all" ? { status: { in: ["pending", "approved", "failed"] } } : { status: estado }),
+                },
+                orderBy: { createdAt: "desc" },
+                take: 20,
+                select: { id: true, type: true, title: true, description: true, payload: true, riskLevel: true, status: true, requiresApproval: true, approvedAt: true, error: true },
+            });
+        },
+    }),
+    finalizarAccionGilberto: tool({
+        description: "Marca como completada o fallida una acción de Gilberto después de intentar su ejecución y guarda el resultado auditado.",
+        inputSchema: z.object({
+            actionId: z.string().uuid(),
+            estado: z.enum(["completed", "failed"]),
+            resumen: z.string().min(1).max(1000),
+        }),
+        execute: async ({ actionId, estado, resumen }) => {
+            if (!context.userId) return { error: "No hay un usuario autenticado." };
+            const action = await prisma.assistantAction.findFirst({ where: { id: actionId, userId: context.userId } });
+            if (!action) return { error: "Acción no encontrada." };
+            if (!["pending", "approved", "failed"].includes(action.status)) return { error: `La acción ya está ${action.status}.` };
+            const updated = await prisma.assistantAction.update({
+                where: { id: action.id },
+                data: {
+                    status: estado,
+                    executedAt: new Date(),
+                    result: estado === "completed" ? { summary: resumen } : undefined,
+                    error: estado === "failed" ? resumen : null,
+                },
+            });
+            await recordAudit({
+                action: estado === "completed" ? "EXECUTE" : "FAIL",
+                entityType: "AssistantAction",
+                entityId: updated.id,
+                summary: resumen,
+                metadata: { type: updated.type, riskLevel: updated.riskLevel },
+            });
+            return { id: updated.id, status: updated.status, summary: resumen };
         },
     }),
     getResumenEjecutivo: tool({
@@ -737,7 +996,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             if (!resolved.project) return resolved;
 
             if (!confirmado) {
-                return confirmationRequired("crearRequisitoProyecto", {
+                return confirmationRequired(context, "crearRequisitoProyecto", {
                     projectId: resolved.project.id,
                     projectName: resolved.project.name,
                     clientName: resolved.project.client.name,
@@ -824,7 +1083,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             };
 
             if (!confirmado) {
-                return confirmationRequired("actualizarRequisitoProyecto", {
+                return confirmationRequired(context, "actualizarRequisitoProyecto", {
                     projectId: resolved.project.id,
                     projectName: resolved.project.name,
                     requirementId,
@@ -973,7 +1232,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             }
 
             if (!confirmado) {
-                return confirmationRequired("enviarCorreo", {
+                return confirmationRequired(context, "enviarCorreo", {
                     to: recipient,
                     subject,
                     body,
@@ -1145,7 +1404,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             if (!resolved.project) return resolved;
 
             if (!confirmado) {
-                return confirmationRequired("crearNotaProyecto", {
+                return confirmationRequired(context, "crearNotaProyecto", {
                     projectId: resolved.project.id,
                     projectName: resolved.project.name,
                     clientName: resolved.project.client.name,
@@ -1194,7 +1453,7 @@ export function createTools(context: GilbertoToolContext = {}) {
         }),
         execute: async ({ id, title, content, folder, confirmado }) => {
             if (!confirmado) {
-                return confirmationRequired("actualizarNota", { id, title, content, folder });
+                return confirmationRequired(context, "actualizarNota", { id, title, content, folder });
             }
 
             const current = await prisma.note.findUnique({ where: { id } });
@@ -1234,7 +1493,7 @@ export function createTools(context: GilbertoToolContext = {}) {
         }),
         execute: async ({ title, content, confirmado }) => {
             if (!confirmado) {
-                return confirmationRequired("crearPendiente", { title, content, folder: "Pendientes" });
+                return confirmationRequired(context, "crearPendiente", { title, content, folder: "Pendientes" });
             }
 
             const note = await prisma.note.create({
@@ -1273,7 +1532,7 @@ export function createTools(context: GilbertoToolContext = {}) {
         }),
         execute: async ({ name, clientName, description, status, agreedAmount, confirmado }) => {
             if (!confirmado) {
-                return confirmationRequired("crearProyecto", {
+                return confirmationRequired(context, "crearProyecto", {
                     name,
                     clientName,
                     description,
@@ -1322,7 +1581,7 @@ export function createTools(context: GilbertoToolContext = {}) {
         execute: async ({ number, client, amount, status, dueDate, confirmado }) => {
             if (!canUseFinance) return { error: "No tienes permiso para crear facturas." };
             if (!confirmado) {
-                return confirmationRequired("crearFactura", {
+                return confirmationRequired(context, "crearFactura", {
                     number,
                     client,
                     amountClp: formatClp(amount),
@@ -2305,7 +2564,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             const parsedDate = paidAt.trim() ? new Date(paidAt) : new Date();
             if (Number.isNaN(parsedDate.getTime())) return { error: "La fecha no es valida. Usa YYYY-MM-DD." };
             if (!confirmado) {
-                return confirmationRequired("registrarPago", {
+                return confirmationRequired(context, "registrarPago", {
                     invoice: invoice.number,
                     client: invoice.client,
                     amountClp: formatClp(amount),
@@ -2653,7 +2912,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             confirmado: z.boolean().default(false),
         }),
         execute: async ({ name, company, contactName, email, value, source, nextAction, confirmado }) => {
-            if (!confirmado) return confirmationRequired("crearOportunidad", { name, company, contactName, email, valueClp: formatClp(value), source, nextAction });
+            if (!confirmado) return confirmationRequired(context, "crearOportunidad", { name, company, contactName, email, valueClp: formatClp(value), source, nextAction });
             const opportunity = await prisma.opportunity.create({
                 data: { name, company: company || null, contactName: contactName || null, email: email || null, value, source, nextAction: nextAction || null },
             });
@@ -2679,7 +2938,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             if (!project || !member) return { error: "No encontre el proyecto o la persona indicada." };
             const entryDate = date ? new Date(date) : new Date();
             if (Number.isNaN(entryDate.getTime())) return { error: "La fecha no es valida." };
-            if (!confirmado) return confirmationRequired("registrarHoras", { project: project.name, member: member.name, description, hours, date: entryDate.toISOString().slice(0, 10), billable });
+            if (!confirmado) return confirmationRequired(context, "registrarHoras", { project: project.name, member: member.name, description, hours, date: entryDate.toISOString().slice(0, 10), billable });
             const entry = await prisma.timeEntry.create({ data: { projectId: project.id, teamMemberId: member.id, description, hours, date: entryDate, billable } });
             invalidateCache(`project:${project.id}`);
             return { ...entry, date: entry.date.toISOString() };
@@ -2699,7 +2958,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             const client = await prisma.client.findFirst({ where: { deletedAt: null, name: { contains: clientName, mode: "insensitive" } } });
             if (!client) return { error: "No encontre el cliente." };
             const project = projectName ? await prisma.project.findFirst({ where: { clientId: client.id, deletedAt: null, name: { contains: projectName, mode: "insensitive" } } }) : null;
-            if (!confirmado) return confirmationRequired("crearTicketSoporte", { client: client.name, project: project?.name ?? null, subject, description, priority });
+            if (!confirmado) return confirmationRequired(context, "crearTicketSoporte", { client: client.name, project: project?.name ?? null, subject, description, priority });
             const count = await prisma.supportTicket.count();
             const createdAt = new Date();
             const ticket = await prisma.supportTicket.create({

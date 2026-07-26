@@ -39,6 +39,9 @@ export async function POST(request: NextRequest) {
         await syncProjectInvoice(project.id);
         invalidateCache("projects:");
         invalidateCache("vault");
+        invalidateCache("dashboard:");
+        invalidateCache("reports:");
+        invalidateCache("gilberto:today:");
         return NextResponse.json(project, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: "Failed to create project" }, { status: 500 });

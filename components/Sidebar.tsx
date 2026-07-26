@@ -12,28 +12,32 @@ import {
   FileText,
   FolderKanban,
   LayoutDashboard,
+  Landmark,
   LogOut,
   Mail,
   MoreHorizontal,
   NotebookPen,
   ShieldCheck,
+  Sparkles,
   User,
 } from "lucide-react";
 import { logout } from "@/app/actions/auth";
 import { prefetchJson } from "@/lib/client-cache";
 
 const navItems = [
+  { label: "Hoy", href: "/hoy", icon: Sparkles, cacheKey: "today", api: "/api/gilberto/today" },
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Gilberto", href: "/gilberto", icon: Bot },
+  { label: "Gilberto", href: "/gilberto", icon: Bot, cacheKey: "gilberto:history", api: "/api/gilberto/history" },
   { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init::0:25", api: "/api/projects/init?q=&skip=0&take=25" },
-  { label: "Gestión", href: "/erp", icon: BriefcaseBusiness },
+  { label: "Gestión", href: "/erp", icon: BriefcaseBusiness, cacheKey: "erp:overview", api: "/api/erp/overview" },
   { label: "Reportes", href: "/reportes", icon: BarChart3, roles: ["ADMIN", "MANAGER", "FINANCE"] },
-  { label: "Actividad", href: "/notificaciones", icon: Bell },
+  { label: "Actividad", href: "/notificaciones", icon: Bell, cacheKey: "erp:notifications", api: "/api/erp/notifications" },
   { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes:::0:30", api: "/api/notes?q=&folder=&skip=0&take=30" },
-  { label: "Correos", href: "/correos", icon: Mail },
+  { label: "Correos", href: "/correos", icon: Mail, cacheKey: "emails:all", api: "/api/emails?status=all&q=" },
   { label: "Documentos", href: "/documentos", icon: FileText, cacheKey: "documents:::0:50", api: "/api/documents?q=&category=&skip=0&take=50" },
   { label: "Boveda", href: "/boveda", icon: ShieldCheck, cacheKey: "vault::0:50", api: "/api/vault?q=&skip=0&take=50" },
   { label: "Finanzas", href: "/finanzas", icon: Coins, cacheKey: "invoices::0:30", api: "/api/invoices?q=&skip=0&take=30", roles: ["ADMIN", "MANAGER", "FINANCE"] },
+  { label: "Impuestos", href: "/impuestos", icon: Landmark, cacheKey: "tax:f29:default", api: "/api/tax/f29", roles: ["ADMIN", "MANAGER", "FINANCE"] },
   { label: "Perfil", href: "/perfil", icon: User },
 ];
 
@@ -85,6 +89,7 @@ export default function Sidebar({ me }: { me: Me | null }) {
               href={item.href}
               prefetch={false}
               onMouseEnter={() => prefetchItem(item)}
+              onFocus={() => prefetchItem(item)}
               onTouchStart={() => prefetchItem(item)}
               className={`group flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
                 active

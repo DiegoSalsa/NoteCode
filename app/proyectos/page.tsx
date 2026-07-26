@@ -12,7 +12,7 @@ import {
     ArrowUpRight,
 } from "lucide-react";
 import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
-import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Client = { id: string; name: string };
@@ -57,7 +57,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ProyectosPage() {
-    const cached = readCachedJson<Partial<ProjectsPayload>>("projects:init::0:25");
+    const cached = useCachedJson<Partial<ProjectsPayload>>("projects:init::0:25");
     const [projects, setProjects] = useState<Project[]>(() => Array.isArray(cached?.projects) ? cached.projects : []);
     const [clients, setClients] = useState<Client[]>(() => Array.isArray(cached?.clients) ? cached.clients : []);
     const [loading, setLoading] = useState(!cached);
@@ -75,6 +75,17 @@ export default function ProyectosPage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
 
+    useEffect(() => {
+        if (!cached) return;
+        const cachedProjects = Array.isArray(cached.projects) ? cached.projects : [];
+        setProjects(cachedProjects);
+        setClients(Array.isArray(cached.clients) ? cached.clients : []);
+        setNextSkip(cached.nextSkip ?? cachedProjects.length);
+        setHasMore(Boolean(cached.hasMore));
+        setTotal(cached.total ?? cachedProjects.length);
+        setLoading(false);
+    }, [cached]);
+
     const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
         const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "25" });
         const key = `projects:init:${debouncedSearch}:${skip}:25`;
@@ -91,8 +102,10 @@ export default function ProyectosPage() {
     }, [debouncedSearch]);
 
     useEffect(() => {
-        setLoading(true);
-        fetchData();
+        if (!projects.length) setLoading(true);
+        void fetchData();
+        // Keep cached rows visible while they are revalidated.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchData]);
 
     async function loadMore() {

@@ -36,14 +36,13 @@ function formatBytes(size: number) {
 }
 
 export default function DocumentosPage() {
-  const cached = readCachedJson<Partial<DocumentsPayload>>("documents:::0:50");
-  const [documents, setDocuments] = useState<CompanyDocument[]>(() => asArray<CompanyDocument>(cached?.documents));
-  const [categories, setCategories] = useState<string[]>(() => asArray<string>(cached?.categories));
-  const [loading, setLoading] = useState(!cached);
+  const [documents, setDocuments] = useState<CompanyDocument[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? documents.length);
-  const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
-  const [total, setTotal] = useState(cached?.total ?? documents.length);
+  const [nextSkip, setNextSkip] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -56,6 +55,18 @@ export default function DocumentosPage() {
     () => [...new Set([...DEFAULT_CATEGORIES, ...categories, ...documents.map((document) => document.category)])],
     [categories, documents],
   );
+
+  useEffect(() => {
+    const cached = readCachedJson<Partial<DocumentsPayload>>("documents:::0:50");
+    if (!cached) return;
+    const cachedDocuments = asArray<CompanyDocument>(cached.documents);
+    setDocuments(cachedDocuments);
+    setCategories(asArray<string>(cached.categories));
+    setNextSkip(cached.nextSkip ?? cachedDocuments.length);
+    setHasMore(Boolean(cached.hasMore));
+    setTotal(cached.total ?? cachedDocuments.length);
+    setLoading(false);
+  }, []);
 
   const fetchDocuments = useCallback(async ({ append = false, skip = 0 } = {}) => {
     try {
@@ -84,8 +95,7 @@ export default function DocumentosPage() {
   }, [debouncedSearch, selectedCategory]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchDocuments();
+    void fetchDocuments();
   }, [fetchDocuments]);
 
   async function loadMore() {

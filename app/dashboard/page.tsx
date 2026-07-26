@@ -13,6 +13,7 @@ import {
 import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cached } from "@/lib/server-cache";
 
 type SummaryData = {
   projects: number;
@@ -84,8 +85,10 @@ function SkeletonLoader({ rows = 3 }: { rows?: number }) {
 }
 
 async function SummaryCards() {
-  const [projectCount, credentialCount, pendingInvoiceCount, pendingInvoiceTotal] =
-    await Promise.all([
+  const [projectCount, credentialCount, pendingInvoiceCount, pendingInvoiceTotal] = await cached(
+    "dashboard:summary",
+    60_000,
+    () => Promise.all([
       prisma.project.count({ where: { deletedAt: null } }),
       prisma.credential.count({ where: { deletedAt: null } }),
       prisma.invoice.count({ where: { deletedAt: null, status: "Pendiente" } }),
@@ -93,7 +96,8 @@ async function SummaryCards() {
         where: { deletedAt: null, status: "Pendiente" },
         _sum: { amount: true },
       }),
-    ]);
+    ]),
+  );
 
   const summary: SummaryData = {
     projects: projectCount,
@@ -150,18 +154,20 @@ async function SummaryCards() {
 }
 
 async function RecentProjects() {
-  const projects = await prisma.project.findMany({
-    where: { deletedAt: null },
-    orderBy: { updatedAt: "desc" },
-    take: 5,
-    select: {
-      id: true,
-      name: true,
-      status: true,
-      updatedAt: true,
-      client: { select: { name: true } },
-    },
-  });
+  const projects = await cached("dashboard:recent-projects", 60_000, () =>
+    prisma.project.findMany({
+      where: { deletedAt: null },
+      orderBy: { updatedAt: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        updatedAt: true,
+        client: { select: { name: true } },
+      },
+    }),
+  );
 
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-neutral-900">
@@ -207,36 +213,15 @@ export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/");
 
-  const profile = await prisma.userProfile.findUnique({
-    where: { userId: user.id },
-    select: {
-      displayName: true,
-      age: true,
-    },
-  }).then((profile) =>
-    profile ??
-    prisma.userProfile.create({
-      data: {
-        userId: user.id,
-        email: user.email,
-        displayName: user.name,
-      },
-      select: {
-        displayName: true,
-        age: true,
-      },
-    }),
-  );
-
   return (
     <div className="mx-auto max-w-5xl space-y-10 px-4 py-6 sm:px-6 sm:py-8 lg:space-y-14 lg:px-8 lg:py-10">
       <section className="space-y-2">
         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">
-          Bienvenido, {profile.displayName || "NoteCoder"}
+          Bienvenido, {user.name || "NoteCoder"}
         </h1>
         <p className="max-w-2xl text-[15px] leading-relaxed text-neutral-400">
-          {profile.age
-            ? `${profile.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
+          {user.age
+            ? `${user.age} anos. Tu centro de control personalizado para proyectos, notas y credenciales.`
             : "Tu centro de control personalizado para proyectos, notas y credenciales."}
         </p>
       </section>

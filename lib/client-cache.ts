@@ -1,5 +1,7 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
+
 type CacheRecord<T> = {
   savedAt: number;
   value: T;
@@ -8,6 +10,8 @@ type CacheRecord<T> = {
 const CACHE_PREFIX = "notecode:";
 const DEFAULT_TTL_MS = 60_000;
 const memoryCache = new Map<string, CacheRecord<unknown>>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+const subscribeToCache = () => () => {};
 
 function storageKey(key: string) {
   return `${CACHE_PREFIX}${key}`;
@@ -35,6 +39,14 @@ export function readCachedJson<T>(key: string, ttlMs = DEFAULT_TTL_MS): T | null
   } catch {
     return null;
   }
+}
+
+export function useCachedJson<T>(key: string, ttlMs = DEFAULT_TTL_MS): T | null {
+  return useSyncExternalStore(
+    subscribeToCache,
+    () => readCachedJson<T>(key, ttlMs),
+    () => null,
+  );
 }
 
 export function writeCachedJson<T>(key: string, value: T) {
@@ -79,13 +91,23 @@ export function clearCachedJsonByPrefix(prefix: string) {
 }
 
 export async function fetchAndCacheJson<T>(key: string, url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url}`);
+  const running = inflightRequests.get(key) as Promise<T> | undefined;
+  if (running) return running;
 
-  const data = (await res.json()) as T;
-  writeCachedJson(key, data);
+  const request = fetch(url)
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Failed to fetch ${url}`);
 
-  return data;
+      const data = (await res.json()) as T;
+      writeCachedJson(key, data);
+      return data;
+    })
+    .finally(() => {
+      if (inflightRequests.get(key) === request) inflightRequests.delete(key);
+    });
+
+  inflightRequests.set(key, request);
+  return request;
 }
 
 export function prefetchJson(key: string, url: string, ttlMs = DEFAULT_TTL_MS) {

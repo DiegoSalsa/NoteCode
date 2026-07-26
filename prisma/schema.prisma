@@ -183,6 +183,7 @@ model Document {
   name          String
   category      String    @default("General")
   mimeType      String    @map("mime_type")
+  checksum      String?   @unique
   size          Int
   fileData      Bytes?    @map("file_data")
   storagePath   String?   @map("storage_path")
@@ -215,22 +216,26 @@ model AuditLog {
 }
 
 model UserProfile {
-  id                String           @id @default(uuid())
-  userId            String           @unique @map("user_id")
-  email             String           @unique
-  displayName       String           @map("display_name")
-  passwordHash      String?          @map("password_hash")
-  passwordChangedAt DateTime?        @map("password_changed_at")
+  id                String             @id @default(uuid())
+  userId            String             @unique @map("user_id")
+  email             String             @unique
+  displayName       String             @map("display_name")
+  passwordHash      String?            @map("password_hash")
+  passwordChangedAt DateTime?          @map("password_changed_at")
   age               Int?
-  role              String           @default("ADMIN")
-  active            Boolean          @default(true)
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  role              String             @default("ADMIN")
+  active            Boolean            @default(true)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
   personalSecrets   PersonalSecret[]
   authTokens        AuthToken[]
   passkeys          Passkey[]
   emailMessages     EmailMessage[]
   pushSubscriptions PushSubscription[]
+  assistantThreads  AssistantThread[]
+  assistantMemories AssistantMemory[]
+  assistantActions  AssistantAction[]
+  assistantRoutines AssistantRoutine[]
 
   @@index([email])
   @@index([role, active])
@@ -774,6 +779,105 @@ model AutomationRule {
   @@map("automation_rules")
 }
 
+model AssistantThread {
+  id            String             @id @default(uuid())
+  userId        String             @map("user_id")
+  user          UserProfile        @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  title         String             @default("Conversación principal")
+  isDefault     Boolean            @default(false) @map("is_default")
+  lastMessageAt DateTime?          @map("last_message_at")
+  archivedAt    DateTime?          @map("archived_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  messages      AssistantMessage[]
+  actions       AssistantAction[]
+
+  @@index([userId, archivedAt, lastMessageAt])
+  @@map("assistant_threads")
+}
+
+model AssistantMessage {
+  id        String          @id
+  threadId  String          @map("thread_id")
+  thread    AssistantThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  role      String
+  text      String?
+  parts     Json            @default("[]")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@index([threadId, createdAt])
+  @@map("assistant_messages")
+}
+
+model AssistantMemory {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  user        UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  key         String
+  value       String
+  category    String      @default("preferencia")
+  source      String      @default("usuario")
+  confidence  Float       @default(1)
+  confirmedAt DateTime?   @map("confirmed_at")
+  lastUsedAt  DateTime?   @map("last_used_at")
+  expiresAt   DateTime?   @map("expires_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@unique([userId, key])
+  @@index([userId, category, expiresAt])
+  @@map("assistant_memories")
+}
+
+model AssistantAction {
+  id               String           @id @default(uuid())
+  userId           String           @map("user_id")
+  user             UserProfile      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  threadId         String?          @map("thread_id")
+  thread           AssistantThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  type             String
+  title            String
+  description      String?
+  payload          Json             @default("{}")
+  riskLevel        String           @default("low") @map("risk_level")
+  status           String           @default("pending")
+  requiresApproval Boolean          @default(false) @map("requires_approval")
+  idempotencyKey   String?          @unique @map("idempotency_key")
+  approvedAt       DateTime?        @map("approved_at")
+  executedAt       DateTime?        @map("executed_at")
+  result           Json?
+  error            String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@index([userId, status, createdAt])
+  @@index([threadId])
+  @@map("assistant_actions")
+}
+
+model AssistantRoutine {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  user        UserProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  name        String
+  description String?
+  schedule    String
+  timezone    String      @default("America/Santiago")
+  actionType  String      @map("action_type")
+  payload     Json        @default("{}")
+  active      Boolean     @default(true)
+  nextRunAt   DateTime?   @map("next_run_at")
+  lastRunAt   DateTime?   @map("last_run_at")
+  lastResult  Json?       @map("last_result")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@unique([userId, actionType])
+  @@index([userId, active, nextRunAt])
+  @@map("assistant_routines")
+}
+
 model AuditEvent {
   id          String   @id @default(uuid())
   actorUserId String?  @map("actor_user_id")
@@ -948,4 +1052,98 @@ model JournalLine {
   @@index([journalEntryId])
   @@index([accountId])
   @@map("journal_lines")
+}
+
+model CompanyTaxProfile {
+  id                  String        @id @default(uuid())
+  rut                 String        @unique
+  legalName           String?       @map("legal_name")
+  companyType         String?       @map("company_type")
+  taxRegime           String?       @map("tax_regime")
+  taxCategory         String?       @map("tax_category")
+  segment             String?
+  vatTaxpayer         Boolean       @default(true) @map("vat_taxpayer")
+  ppmRate             Decimal       @default(0) @map("ppm_rate") @db.Decimal(7, 4)
+  ppmRateConfirmed    Boolean       @default(false) @map("ppm_rate_confirmed")
+  f29DueDay           Int           @default(20) @map("f29_due_day")
+  siiProposalEnabled  Boolean       @default(false) @map("sii_proposal_enabled")
+  businessStartDate   DateTime?     @map("business_start_date")
+  activityDescription String?       @map("activity_description")
+  address             String?
+  commune             String?
+  contactEmail        String?       @map("contact_email")
+  contactPhone        String?       @map("contact_phone")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  taxDocuments        TaxDocument[]
+  f29Periods          F29Period[]
+
+  @@map("company_tax_profiles")
+}
+
+model TaxDocument {
+  id                   String            @id @default(uuid())
+  profileId            String            @map("profile_id")
+  profile              CompanyTaxProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  source               String            @default("manual")
+  direction            String
+  documentType         String            @map("document_type")
+  folio                String
+  counterpartyRut      String?           @map("counterparty_rut")
+  counterpartyName     String?           @map("counterparty_name")
+  issuedAt             DateTime          @map("issued_at")
+  period               String
+  netAmount            Int               @default(0) @map("net_amount")
+  exemptAmount         Int               @default(0) @map("exempt_amount")
+  vatAmount            Int               @default(0) @map("vat_amount")
+  vatRecoverableAmount Int               @default(0) @map("vat_recoverable_amount")
+  withholdingAmount    Int               @default(0) @map("withholding_amount")
+  otherTaxAmount       Int               @default(0) @map("other_tax_amount")
+  totalAmount          Int               @default(0) @map("total_amount")
+  rcvStatus            String?           @map("rcv_status")
+  status               String            @default("Registrado")
+  rawData              Json              @default("{}") @map("raw_data")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  @@unique([profileId, direction, documentType, folio])
+  @@index([profileId, period, direction])
+  @@index([issuedAt])
+  @@index([counterpartyRut])
+  @@map("tax_documents")
+}
+
+model F29Period {
+  id                   String            @id @default(uuid())
+  profileId            String            @map("profile_id")
+  profile              CompanyTaxProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  period               String
+  status               String            @default("Borrador")
+  dueDate              DateTime?         @map("due_date")
+  debitVat             Int               @default(0) @map("debit_vat")
+  creditVat            Int               @default(0) @map("credit_vat")
+  previousCarryForward Int               @default(0) @map("previous_carry_forward")
+  nextCarryForward     Int               @default(0) @map("next_carry_forward")
+  vatPayable           Int               @default(0) @map("vat_payable")
+  ppmBase              Int               @default(0) @map("ppm_base")
+  ppmRate              Decimal           @default(0) @map("ppm_rate") @db.Decimal(7, 4)
+  ppmAmount            Int               @default(0) @map("ppm_amount")
+  withholdings         Int               @default(0)
+  otherTaxes           Int               @default(0) @map("other_taxes")
+  estimatedTotal       Int               @default(0) @map("estimated_total")
+  siiProposedTotal     Int?              @map("sii_proposed_total")
+  variance             Int?
+  confidence           String            @default("Baja")
+  calculation          Json              @default("{}")
+  calculatedAt         DateTime?         @map("calculated_at")
+  reviewedAt           DateTime?         @map("reviewed_at")
+  reviewedBy           String?           @map("reviewed_by")
+  filedAt              DateTime?         @map("filed_at")
+  paymentReference     String?           @map("payment_reference")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  @@unique([profileId, period])
+  @@index([period, status])
+  @@map("f29_periods")
 }

@@ -45,8 +45,9 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const { resource } = await params;
+  const hasFinanceAccess = canManageFinance(user);
   const financialResources = ["expenses", "payments", "suppliers", "purchase-orders", "payroll", "accounts", "journal"];
-  if (financialResources.includes(resource) && !canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para ver esta sección." }, { status: 403 });
+  if (financialResources.includes(resource) && !hasFinanceAccess) return NextResponse.json({ error: "No tienes permiso para ver esta sección." }, { status: 403 });
   if (["audit", "users", "trash"].includes(resource) && user.role !== "ADMIN") return NextResponse.json({ error: "Solo administración puede ver esta sección." }, { status: 403 });
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
 
@@ -105,7 +106,18 @@ export async function GET(
             grossCashFlow: (payments._sum.amount ?? 0) - (expenses._sum.amount ?? 0),
           };
         });
-        return NextResponse.json(overview);
+        if (!hasFinanceAccess) {
+          const {
+            pipelineValue: _pipelineValue,
+            invoicedThisMonth: _invoicedThisMonth,
+            collectedThisMonth: _collectedThisMonth,
+            expensesThisMonth: _expensesThisMonth,
+            grossCashFlow: _grossCashFlow,
+            ...nonFinancialOverview
+          } = overview;
+          return NextResponse.json({ ...nonFinancialOverview, financialAccess: false });
+        }
+        return NextResponse.json({ ...overview, financialAccess: true });
       }
       case "options": {
         const options = await cached("erp:options", 120_000, async () => {
@@ -121,7 +133,9 @@ export async function GET(
           ]);
           return { clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods };
         });
-        return NextResponse.json(options);
+        return NextResponse.json(hasFinanceAccess
+          ? options
+          : { ...options, invoices: [], accounts: [], payrollPeriods: [] });
       }
       case "clients":
         return NextResponse.json(await prisma.client.findMany({
@@ -208,11 +222,13 @@ export async function GET(
           include: { project: { select: { id: true, name: true, client: { select: { id: true, name: true } } } } },
         }));
       case "notifications":
-        return NextResponse.json(await prisma.notification.findMany({
-          where: { OR: [{ userId: null }, { userId: user.id }] },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        }));
+        return NextResponse.json(await cached(`erp:notifications:${user.id}`, 30_000, () =>
+          prisma.notification.findMany({
+            where: { OR: [{ userId: null }, { userId: user.id }] },
+            orderBy: { createdAt: "desc" },
+            take: 100,
+          }),
+        ));
       case "automations":
         return NextResponse.json(await prisma.automationRule.findMany({ orderBy: { createdAt: "desc" } }));
       case "users":
@@ -232,7 +248,13 @@ export async function GET(
         return NextResponse.json(await prisma.asset.findMany({
           where: { deletedAt: null },
           orderBy: [{ status: "asc" }, { name: "asc" }],
-          include: { assignedTo: { select: { id: true, name: true } } },
+          select: {
+            id: true, name: true, type: true, category: true, serialNumber: true, vendor: true,
+            assignedToId: true, purchaseDate: true, purchaseCost: true, renewalDate: true,
+            monthlyCost: true, status: true, location: true, notes: true, createdAt: true,
+            updatedAt: true, deletedAt: true,
+            assignedTo: { select: { id: true, name: true } },
+          },
         }));
       case "payroll":
         return NextResponse.json(await prisma.payrollPeriod.findMany({

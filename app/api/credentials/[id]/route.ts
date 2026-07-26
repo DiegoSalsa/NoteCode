@@ -37,6 +37,7 @@ export async function PATCH(
     if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
+    invalidateCache("dashboard:");
 
     return NextResponse.json({ ...credential, password: MASKED_SECRET });
   } catch {
@@ -58,6 +59,7 @@ export async function DELETE(
     if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
+    invalidateCache("dashboard:");
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete credential" }, { status: 500 });

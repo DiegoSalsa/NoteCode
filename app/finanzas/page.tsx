@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, ArrowUpRight, ArrowDownRight, DollarSign } from "lucide-react";
-import { fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Invoice = {
@@ -66,7 +66,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function FinanzasPage() {
-    const cached = readCachedJson<InvoicesPayload>("invoices::0:30");
+    const cached = useCachedJson<InvoicesPayload>("invoices::0:30");
     const [invoices, setInvoices] = useState<Invoice[]>(() => asArray<Invoice>(cached?.items));
     const [loading, setLoading] = useState(!cached);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -84,6 +84,17 @@ export default function FinanzasPage() {
     const [form, setForm] = useState({ number: "", client: "", clientId: "", projectId: "", amount: "", taxRate: "19", status: "Pendiente", dueDate: "" });
     const [erpOptions, setErpOptions] = useState<{ clients: { id: string; name: string }[]; projects: { id: string; name: string; clientId: string }[] }>({ clients: [], projects: [] });
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!cached) return;
+        const cachedInvoices = asArray<Invoice>(cached.items);
+        setInvoices(cachedInvoices);
+        setNextSkip(cached.nextSkip ?? cachedInvoices.length);
+        setHasMore(Boolean(cached.hasMore));
+        setTotal(cached.total ?? cachedInvoices.length);
+        setSummary(cached.summary ?? { totalAmount: 0, pendingAmount: 0, paidAmount: 0 });
+        setLoading(false);
+    }, [cached]);
 
     const fetchInvoices = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
@@ -106,8 +117,10 @@ export default function FinanzasPage() {
     }, [debouncedSearch, statusFilter]);
 
     useEffect(() => {
-        setLoading(true);
-        fetchInvoices();
+        if (!invoices.length) setLoading(true);
+        void fetchInvoices();
+        // Keep cached rows visible while they are revalidated.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchInvoices]);
 
     useEffect(() => {

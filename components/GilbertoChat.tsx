@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { usePathname } from "next/navigation";
-import { Bot, Loader2, Mic, MicOff, Play, Send, Volume2, VolumeX } from "lucide-react";
+import { Bot, Loader2, Mic, MicOff, Play, Plus, Send, Volume2, VolumeX } from "lucide-react";
 
 const DEEPGRAM_VOICES = [
     { id: "aura-2-estrella-es", label: "Estrella - natural MX" },
@@ -20,14 +20,27 @@ const DEEPGRAM_VOICES = [
     { id: "aura-2-valerio-es", label: "Valerio - grave natural" },
 ];
 
-const CHAT_SESSION_KEY = "gilberto.sessionMessages";
 const VOICE_ENABLED_KEY = "gilberto.voiceEnabled";
+
+type ThreadOption = {
+    id: string;
+    title: string;
+    isDefault: boolean;
+};
 
 function getMessageText(message: UIMessage) {
     return message.parts
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("");
+}
+
+function messagesFingerprint(messages: UIMessage[]) {
+    return JSON.stringify(messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        parts: message.parts,
+    })));
 }
 
 function renderInlineMarkdown(text: string) {
@@ -98,18 +111,6 @@ function getSupportedMimeType() {
     return options.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-function readSessionMessages() {
-    if (typeof window === "undefined") return [];
-
-    try {
-        const raw = window.sessionStorage.getItem(CHAT_SESSION_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
 function readVoiceEnabled() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(VOICE_ENABLED_KEY) === "true";
@@ -120,13 +121,19 @@ export default function GilbertoChat({ className = "" }: { className?: string })
     const pathnameRef = useRef(pathname);
     const [input, setInput] = useState("");
     const [isRecording, setIsRecording] = useState(false);
-    const [initialMessages] = useState<UIMessage[]>(() => readSessionMessages() as UIMessage[]);
+    const [initialMessages] = useState<UIMessage[]>([]);
+    const [historyReady, setHistoryReady] = useState(false);
+    const [historyError, setHistoryError] = useState("");
+    const [threads, setThreads] = useState<ThreadOption[]>([]);
     const [voiceEnabled, setVoiceEnabled] = useState(() => readVoiceEnabled());
     const [selectedVoice, setSelectedVoice] = useState(DEEPGRAM_VOICES[0].id);
     const [voiceStatus, setVoiceStatus] = useState("");
     const [voiceError, setVoiceError] = useState("");
 
     const lastSpokenMessageId = useRef<string | null>(null);
+    const lastPersistedMessagesRef = useRef("");
+    const skipNextPersistenceRef = useRef(false);
+    const threadIdRef = useRef<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -147,6 +154,7 @@ export default function GilbertoChat({ className = "" }: { className?: string })
                             context: {
                                 pathname: currentPathname,
                                 currentProjectId: projectMatch?.[1] ?? null,
+                                threadId: threadIdRef.current,
                             },
                         },
                     };
@@ -155,7 +163,7 @@ export default function GilbertoChat({ className = "" }: { className?: string })
         [],
     );
 
-    const { messages, sendMessage, status, stop, error } = useChat({
+    const { messages, sendMessage, status, stop, error, setMessages } = useChat({
         transport,
         messages: initialMessages,
     });
@@ -177,9 +185,60 @@ export default function GilbertoChat({ className = "" }: { className?: string })
     }, []);
 
     useEffect(() => {
-        if (typeof window === "undefined") return;
-        window.sessionStorage.setItem(CHAT_SESSION_KEY, JSON.stringify(messages));
-    }, [messages]);
+        let cancelled = false;
+
+        void fetch("/api/gilberto/history", { cache: "no-store" })
+            .then(async (response) => {
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error ?? "No se pudo cargar la conversación.");
+                if (cancelled) return;
+                const nextMessages = Array.isArray(payload.messages) ? payload.messages as UIMessage[] : [];
+                threadIdRef.current = payload.threadId;
+                setThreads(Array.isArray(payload.threads) ? payload.threads : []);
+                lastPersistedMessagesRef.current = messagesFingerprint(nextMessages);
+                skipNextPersistenceRef.current = true;
+                setMessages(nextMessages);
+            })
+            .catch((caught) => {
+                if (!cancelled) setHistoryError(caught instanceof Error ? caught.message : "No se pudo cargar la conversación.");
+            })
+            .finally(() => {
+                if (!cancelled) setHistoryReady(true);
+            });
+
+        return () => { cancelled = true; };
+    }, [setMessages]);
+
+    useEffect(() => {
+        if (!historyReady || status !== "ready" || !threadIdRef.current) return;
+        const fingerprint = messagesFingerprint(messages);
+        if (skipNextPersistenceRef.current) {
+            skipNextPersistenceRef.current = false;
+            lastPersistedMessagesRef.current = fingerprint;
+            return;
+        }
+        if (fingerprint === lastPersistedMessagesRef.current) return;
+
+        const timer = window.setTimeout(() => {
+            void fetch("/api/gilberto/history", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ threadId: threadIdRef.current, messages }),
+            }).then(async (response) => {
+                if (response.ok) {
+                    lastPersistedMessagesRef.current = fingerprint;
+                    setHistoryError("");
+                    return;
+                }
+                const payload = await response.json().catch(() => null);
+                throw new Error(payload?.error ?? "No se pudo guardar la conversación.");
+            }).catch((caught) => {
+                setHistoryError(caught instanceof Error ? caught.message : "No se pudo guardar la conversación.");
+            });
+        }, 350);
+
+        return () => window.clearTimeout(timer);
+    }, [historyReady, messages, status]);
 
     useEffect(() => {
         if (typeof window === "undefined" || !selectedVoice) return;
@@ -248,7 +307,7 @@ export default function GilbertoChat({ className = "" }: { className?: string })
 
     async function sendVoiceText(text: string) {
         const cleanText = text.trim();
-        if (!cleanText || isBusy) return;
+        if (!cleanText || isBusy || !historyReady) return;
 
         setInput("");
         await sendMessage({ text: cleanText });
@@ -347,10 +406,45 @@ export default function GilbertoChat({ className = "" }: { className?: string })
         void playDeepgramVoice("Hola, soy Gilberto. Ahora uso una voz de Deepgram en espanol y puedo escucharte desde el celular.");
     }
 
+    async function replaceConversation(method: "POST" | "PATCH", threadId?: string) {
+        if (isBusy) return;
+        setHistoryReady(false);
+        setHistoryError("");
+        try {
+            const currentFingerprint = messagesFingerprint(messages);
+            if (threadIdRef.current && messages.length && currentFingerprint !== lastPersistedMessagesRef.current) {
+                const saveResponse = await fetch("/api/gilberto/history", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ threadId: threadIdRef.current, messages }),
+                });
+                if (!saveResponse.ok) throw new Error("No se pudo guardar la conversación actual.");
+                lastPersistedMessagesRef.current = currentFingerprint;
+            }
+            const response = await fetch("/api/gilberto/history", {
+                method,
+                headers: { "Content-Type": "application/json" },
+                ...(threadId ? { body: JSON.stringify({ threadId }) } : {}),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error ?? "No se pudo cambiar la conversación.");
+            const nextMessages = Array.isArray(payload.messages) ? payload.messages as UIMessage[] : [];
+            threadIdRef.current = payload.threadId;
+            setThreads(Array.isArray(payload.threads) ? payload.threads : []);
+            lastPersistedMessagesRef.current = messagesFingerprint(nextMessages);
+            skipNextPersistenceRef.current = true;
+            setMessages(nextMessages);
+        } catch (caught) {
+            setHistoryError(caught instanceof Error ? caught.message : "No se pudo cambiar la conversación.");
+        } finally {
+            setHistoryReady(true);
+        }
+    }
+
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         const text = input.trim();
-        if (!text || isBusy) return;
+        if (!text || isBusy || !historyReady) return;
 
         setInput("");
         await sendMessage({ text });
@@ -365,10 +459,30 @@ export default function GilbertoChat({ className = "" }: { className?: string })
                     </div>
                     <div className="min-w-0">
                         <h2 className="truncate text-[15px] font-semibold text-neutral-100">Gilberto</h2>
-                        <p className="truncate text-[12px] text-neutral-500">Voz Deepgram, proyectos, finanzas CLP y notas</p>
+                        <p className="truncate text-[12px] text-neutral-500">
+                            {historyReady ? "Memoria activa · voz, finanzas Chile y operación" : "Cargando memoria..."}
+                        </p>
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
+                    <select
+                        aria-label="Conversación de Gilberto"
+                        value={threadIdRef.current ?? ""}
+                        onChange={(event) => void replaceConversation("PATCH", event.target.value)}
+                        disabled={!historyReady || isBusy}
+                        className="max-w-44 rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-[12px] text-neutral-300 outline-none hover:bg-white/5 disabled:opacity-50"
+                    >
+                        {threads.map((thread) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
+                    </select>
+                    <button
+                        type="button"
+                        onClick={() => void replaceConversation("POST")}
+                        disabled={!historyReady || isBusy}
+                        className="rounded-md p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100 disabled:opacity-40"
+                        title="Nueva conversación"
+                    >
+                        <Plus size={16} />
+                    </button>
                     <select
                         value={selectedVoice}
                         onChange={(event) => setSelectedVoice(event.target.value)}
@@ -441,6 +555,12 @@ export default function GilbertoChat({ className = "" }: { className?: string })
                     </div>
                 )}
 
+                {historyError && (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-100">
+                        {historyError}
+                    </div>
+                )}
+
                 {voiceError && (
                     <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-100">
                         {voiceError}
@@ -469,12 +589,13 @@ export default function GilbertoChat({ className = "" }: { className?: string })
                         }}
                         rows={1}
                         placeholder="Escribele a Gilberto..."
+                        disabled={!historyReady}
                         className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-[14px] text-neutral-100 outline-none placeholder:text-neutral-600"
                     />
                     <button
                         type="button"
                         onClick={isRecording ? stopRecording : startRecording}
-                        disabled={!canRecord || isBusy}
+                        disabled={!canRecord || isBusy || !historyReady}
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/10 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                             isRecording
                                 ? "bg-red-500/15 text-red-200 hover:bg-red-500/20"
@@ -487,7 +608,7 @@ export default function GilbertoChat({ className = "" }: { className?: string })
                     <button
                         type={isBusy ? "button" : "submit"}
                         onClick={isBusy ? stop : undefined}
-                        disabled={!isBusy && !input.trim()}
+                        disabled={!isBusy && (!input.trim() || !historyReady)}
                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                         title={isBusy ? "Detener respuesta" : "Enviar"}
                     >

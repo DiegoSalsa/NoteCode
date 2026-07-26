@@ -1,9 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { Bot, X } from "lucide-react";
-import GilbertoChat from "@/components/GilbertoChat";
+
+const GilbertoChat = dynamic(() => import("@/components/GilbertoChat"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[min(680px,calc(100vh-7rem))] items-center justify-center rounded-xl border border-white/10 bg-neutral-950 text-sm text-neutral-500">
+      Preparando a Gilberto...
+    </div>
+  ),
+});
 
 export default function FloatingGilberto() {
   const pathname = usePathname();

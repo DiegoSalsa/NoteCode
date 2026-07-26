@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, Clock3, Gauge, TrendingUp } from "lucide-react";
 import { canManageFinance, getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cached } from "@/lib/server-cache";
 
 const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 const numeric = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 });
@@ -13,30 +15,58 @@ export default async function ReportsPage() {
   if (!user) redirect("/");
   if (!canManageFinance(user)) redirect("/dashboard");
 
+  return (
+    <Suspense fallback={<ReportsLoading />}>
+      <ReportsContent />
+    </Suspense>
+  );
+}
+
+function ReportsLoading() {
+  return (
+    <div className="mx-auto max-w-7xl space-y-7 px-4 py-7 sm:px-6 lg:px-8 lg:py-10">
+      <header>
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500"><BarChart3 size={14} /> Inteligencia de negocio</div>
+        <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">Reportes y rentabilidad</h1>
+        <p className="mt-1 text-sm text-neutral-500">Preparando ventas, caja, costos, capacidad y margen.</p>
+      </header>
+      <div className="grid animate-pulse gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((item) => <div key={item} className="h-28 rounded-xl border border-white/10 bg-neutral-900" />)}
+      </div>
+      <div className="h-80 animate-pulse rounded-xl border border-white/10 bg-neutral-900" />
+    </div>
+  );
+}
+
+async function ReportsContent() {
   const since = new Date();
   since.setMonth(since.getMonth() - 5, 1);
   since.setHours(0, 0, 0, 0);
 
-  const [projects, opportunities, payments, expenses, team] = await Promise.all([
-    prisma.project.findMany({
-      where: { deletedAt: null },
-      orderBy: { updatedAt: "desc" },
-      include: {
-        client: { select: { name: true } },
-        timeEntries: { include: { teamMember: { select: { hourlyCost: true, billableRate: true } } } },
-        expenses: { where: { deletedAt: null } },
-        invoices: { where: { deletedAt: null }, include: { payments: true } },
-      },
-    }),
-    prisma.opportunity.groupBy({ by: ["stage"], where: { deletedAt: null }, _sum: { value: true }, _count: { id: true } }),
-    prisma.payment.findMany({ where: { paidAt: { gte: since } }, select: { amount: true, paidAt: true } }),
-    prisma.expense.findMany({ where: { deletedAt: null, date: { gte: since } }, select: { amount: true, date: true } }),
-    prisma.teamMember.findMany({
-      where: { deletedAt: null, active: true },
-      orderBy: { name: "asc" },
-      include: { timeEntries: { where: { date: { gte: new Date(Date.now() - 7 * 86400000) } }, select: { hours: true, billable: true } } },
-    }),
-  ]);
+  const [projects, opportunities, payments, expenses, team] = await cached(
+    "reports:business-intelligence",
+    60_000,
+    () => Promise.all([
+      prisma.project.findMany({
+        where: { deletedAt: null },
+        orderBy: { updatedAt: "desc" },
+        include: {
+          client: { select: { name: true } },
+          timeEntries: { include: { teamMember: { select: { hourlyCost: true, billableRate: true } } } },
+          expenses: { where: { deletedAt: null } },
+          invoices: { where: { deletedAt: null }, include: { payments: true } },
+        },
+      }),
+      prisma.opportunity.groupBy({ by: ["stage"], where: { deletedAt: null }, _sum: { value: true }, _count: { id: true } }),
+      prisma.payment.findMany({ where: { paidAt: { gte: since } }, select: { amount: true, paidAt: true } }),
+      prisma.expense.findMany({ where: { deletedAt: null, date: { gte: since } }, select: { amount: true, date: true } }),
+      prisma.teamMember.findMany({
+        where: { deletedAt: null, active: true },
+        orderBy: { name: "asc" },
+        include: { timeEntries: { where: { date: { gte: new Date(Date.now() - 7 * 86400000) } }, select: { hours: true, billable: true } } },
+      }),
+    ]),
+  );
 
   const profitability = projects.map((project) => {
     const hours = project.timeEntries.reduce((sum, entry) => sum + entry.hours, 0);

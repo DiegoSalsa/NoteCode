@@ -1,4 +1,7 @@
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { recordAudit } from "@/lib/audit";
+import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { cached, invalidateCache } from "@/lib/server-cache";
 import { uploadDocumentFile } from "@/lib/storage";
@@ -7,9 +10,24 @@ import { documentFileName } from "@/lib/document-files";
 const DEFAULT_TAKE = 50;
 const MAX_TAKE = 100;
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { searchParams } = new URL(request.url);
     const q = searchParams.get("q")?.trim() || "";
     const category = searchParams.get("category")?.trim() || "";
@@ -71,6 +89,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const formData = await request.formData();
     const file = formData.get("file");
     const category = String(formData.get("category") || "General").trim() || "General";
@@ -83,8 +103,24 @@ export async function POST(request: NextRequest) {
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json({ error: "El documento supera el maximo de 12 MB." }, { status: 413 });
     }
+    if (!ALLOWED_MIME_TYPES.has(file.type || "application/octet-stream")) {
+      return NextResponse.json({ error: "Tipo de archivo no permitido." }, { status: 415 });
+    }
 
     const bytes = Buffer.from(await file.arrayBuffer());
+    const checksum = createHash("sha256").update(bytes).digest("hex");
+    const duplicate = await prisma.document.findUnique({
+      where: { checksum },
+      select: { id: true, name: true, deletedAt: true },
+    });
+    if (duplicate) {
+      return NextResponse.json({
+        error: duplicate.deletedAt
+          ? `Este archivo ya existe en la papelera como ${duplicate.name}.`
+          : `Este archivo ya existe como ${duplicate.name}.`,
+        duplicateId: duplicate.id,
+      }, { status: 409 });
+    }
     const name = documentFileName(customName || file.name, file.type || "application/octet-stream", file.name);
     const storedFile = await uploadDocumentFile({
       bytes,
@@ -96,6 +132,7 @@ export async function POST(request: NextRequest) {
         name,
         category,
         mimeType: file.type || "application/octet-stream",
+        checksum,
         size: file.size,
         fileData: storedFile ? null : bytes,
         storagePath: storedFile?.path ?? null,
@@ -113,6 +150,13 @@ export async function POST(request: NextRequest) {
     });
 
     invalidateCache("documents");
+    await recordAudit({
+      action: "CREATE",
+      entityType: "Document",
+      entityId: document.id,
+      summary: `Documento cargado: ${document.name}`,
+      metadata: { category: document.category, mimeType: document.mimeType, size: document.size, checksum },
+    });
     return NextResponse.json(document, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to upload document" }, { status: 500 });

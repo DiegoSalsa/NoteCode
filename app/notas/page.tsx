@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
-import { clearCachedJsonByPrefix, fetchAndCacheJson, readCachedJson } from "@/lib/client-cache";
+import { clearCachedJsonByPrefix, fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Note = {
@@ -29,7 +29,7 @@ function asArray<T>(value: unknown): T[] {
 }
 
 export default function NotasPage() {
-    const cached = readCachedJson<NotesPayload>("notes:::0:30");
+    const cached = useCachedJson<NotesPayload>("notes:::0:30");
     const [notes, setNotes] = useState<Note[]>(() => asArray<Note>(cached?.items));
     const [availableFolders, setAvailableFolders] = useState<string[]>(() => asArray<string>(cached?.folders));
     const [loading, setLoading] = useState(!cached);
@@ -47,6 +47,17 @@ export default function NotasPage() {
     const [editing, setEditing] = useState<Note | null>(null);
     const [form, setForm] = useState({ title: "", content: "", folder: "General" });
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!cached) return;
+        const cachedNotes = asArray<Note>(cached.items);
+        setNotes(cachedNotes);
+        setAvailableFolders(asArray<string>(cached.folders));
+        setNextSkip(cached.nextSkip ?? cachedNotes.length);
+        setHasMore(Boolean(cached.hasMore));
+        setTotal(cached.total ?? cachedNotes.length);
+        setLoading(false);
+    }, [cached]);
 
     const fetchNotes = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
@@ -74,8 +85,10 @@ export default function NotasPage() {
     }, [debouncedSearch, selectedFolder]);
 
     useEffect(() => {
-        setLoading(true);
-        fetchNotes();
+        if (!notes.length) setLoading(true);
+        void fetchNotes();
+        // Keep cached rows visible while they are revalidated.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fetchNotes]);
 
     async function loadMore() {

@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached, invalidateCache } from "@/lib/server-cache";
 import { canManageFinance, getCurrentUser } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
+import { createInvoiceSchema } from "@/lib/validation/invoice";
 
 const DEFAULT_TAKE = 30;
 const MAX_TAKE = 80;
 
 export async function GET(request: NextRequest) {
     const user = await getCurrentUser();
-    if (!user || !canManageFinance(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (!canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para ver finanzas." }, { status: 403 });
     try {
         const { searchParams } = new URL(request.url);
         const q = searchParams.get("q")?.trim() || "";
@@ -133,27 +136,56 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     const user = await getCurrentUser();
-    if (!user || !canManageFinance(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (!canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para crear facturas." }, { status: 403 });
     try {
-        const body = await request.json();
+        const parsed = createInvoiceSchema.safeParse(await request.json().catch(() => null));
+        if (!parsed.success) {
+            return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Factura invalida." }, { status: 400 });
+        }
+        const body = parsed.data;
+        const selectedClient = body.clientId
+            ? await prisma.client.findFirst({ where: { id: body.clientId, deletedAt: null }, select: { id: true, name: true } })
+            : null;
+        if (body.clientId && !selectedClient) return NextResponse.json({ error: "El cliente seleccionado no existe." }, { status: 400 });
+        const selectedProject = body.projectId
+            ? await prisma.project.findFirst({ where: { id: body.projectId, deletedAt: null }, select: { id: true, clientId: true } })
+            : null;
+        if (body.projectId && !selectedProject) return NextResponse.json({ error: "El proyecto seleccionado no existe." }, { status: 400 });
+        if (selectedProject && selectedClient && selectedProject.clientId !== selectedClient.id) {
+            return NextResponse.json({ error: "El proyecto no pertenece al cliente seleccionado." }, { status: 400 });
+        }
         const invoice = await prisma.invoice.create({
             data: {
                 number: body.number,
-                client: body.client,
+                client: selectedClient?.name ?? body.client,
                 amount: body.amount,
                 projectId: body.projectId || null,
                 clientId: body.clientId || null,
                 netAmount: body.netAmount === undefined ? Number(body.amount) / (1 + (Number(body.taxRate) || 19) / 100) : Number(body.netAmount),
-                taxRate: Number(body.taxRate) || 19,
-                currency: body.currency || "CLP",
+                taxRate: Number(body.taxRate),
+                currency: body.currency,
                 issuedAt: body.issuedAt ? new Date(body.issuedAt) : new Date(),
-                status: body.status || "Pendiente",
+                status: body.status,
                 dueDate: new Date(body.dueDate),
+                notes: body.notes || null,
             },
         });
+        await recordAudit({
+            action: "CREATE",
+            entityType: "Invoice",
+            entityId: invoice.id,
+            summary: `Factura ${invoice.number} creada`,
+            metadata: { amount: invoice.amount, currency: invoice.currency, status: invoice.status },
+        });
         invalidateCache("invoices");
+        invalidateCache("dashboard:");
+        invalidateCache("reports:");
+        invalidateCache("tax:");
+        invalidateCache("gilberto:today:");
         return NextResponse.json(invoice, { status: 201 });
     } catch (error) {
-        return NextResponse.json({ error: "Failed to create invoice" }, { status: 500 });
+        console.error("[invoices:create]", error);
+        return NextResponse.json({ error: "No se pudo crear la factura." }, { status: 500 });
     }
 }

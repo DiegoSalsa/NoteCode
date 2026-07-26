@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
+import { cached, invalidateCache } from "@/lib/server-cache";
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -19,23 +20,25 @@ export async function GET(request: NextRequest) {
   const status = clean(searchParams.get("status"));
   const q = clean(searchParams.get("q"));
 
-  const messages = await prisma.emailMessage.findMany({
-    where: {
-      userId: user.id,
-      ...(status && status !== "all" ? { status } : {}),
-      ...(q
-        ? {
-            OR: [
-              { to: { contains: q, mode: "insensitive" } },
-              { subject: { contains: q, mode: "insensitive" } },
-              { body: { contains: q, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 80,
-  });
+  const messages = await cached(`emails:${user.id}:${status}:${q}`, 30_000, () =>
+    prisma.emailMessage.findMany({
+      where: {
+        userId: user.id,
+        ...(status && status !== "all" ? { status } : {}),
+        ...(q
+          ? {
+              OR: [
+                { to: { contains: q, mode: "insensitive" } },
+                { subject: { contains: q, mode: "insensitive" } },
+                { body: { contains: q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 80,
+    }),
+  );
 
   return NextResponse.json({ items: messages });
 }
@@ -70,6 +73,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(draft, { status: 201 });
   }
 
@@ -96,6 +100,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(sent, { status: 201 });
   } catch (error) {
     const failed = await prisma.emailMessage.update({
@@ -106,6 +111,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(failed, { status: 502 });
   }
 }

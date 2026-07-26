@@ -10,6 +10,7 @@ export async function POST(req: Request) {
             context?: {
                 pathname?: string;
                 currentProjectId?: string | null;
+                threadId?: string | null;
             };
         };
 

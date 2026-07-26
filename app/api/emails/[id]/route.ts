@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -48,6 +49,7 @@ export async function PATCH(
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(draft);
   }
 
@@ -73,6 +75,7 @@ export async function PATCH(
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(sent);
   } catch (error) {
     const failed = await prisma.emailMessage.update({
@@ -83,6 +86,7 @@ export async function PATCH(
       },
     });
 
+    invalidateCache(`emails:${user.id}:`);
     return NextResponse.json(failed, { status: 502 });
   }
 }
@@ -96,6 +100,7 @@ export async function DELETE(
 
   const { id } = await params;
   await prisma.emailMessage.deleteMany({ where: { id, userId: user.id } });
+  invalidateCache(`emails:${user.id}:`);
 
   return NextResponse.json({ ok: true });
 }

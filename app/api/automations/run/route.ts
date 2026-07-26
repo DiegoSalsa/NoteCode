@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { notify, recordAudit } from "@/lib/audit";
+import { runDueAssistantRoutines } from "@/lib/assistant/routines";
 
 async function alreadyNotified(type: string, href: string) {
   const since = new Date(Date.now() - 20 * 3600000);
   return prisma.notification.findFirst({ where: { type, href, createdAt: { gte: since } }, select: { id: true } });
 }
 
-async function executeAutomations() {
+async function executeAutomations(forceRoutinesForUserId?: string) {
   const now = new Date();
   const inSevenDays = new Date(Date.now() + 7 * 86400000);
   const inactiveSince = new Date(Date.now() - 14 * 86400000);
@@ -23,9 +24,10 @@ async function executeAutomations() {
     prisma.supportContract.findMany({ where: { deletedAt: null, status: "Activo", monthlyAmount: { gt: 0 }, nextBillingAt: { lte: now } }, include: { client: true }, take: 50 }),
   ]);
 
+  const routineRun = await runDueAssistantRoutines(now, forceRoutinesForUserId ? { forceUserId: forceRoutinesForUserId } : undefined);
   const configuredTriggers = new Set(rules.map((rule) => rule.trigger));
   const useAll = rules.length === 0;
-  let created = 0;
+  let created = routineRun.notifications;
 
   async function create(type: string, title: string, message: string, href: string, severity = "warning") {
     if (await alreadyNotified(type, href)) return;
@@ -67,13 +69,18 @@ async function executeAutomations() {
 
   if (rules.length) await prisma.automationRule.updateMany({ where: { active: true }, data: { lastRunAt: now } });
   await recordAudit({ action: "RUN", entityType: "Automation", entityId: "all", summary: `${created} notificaciones creadas` });
-  return NextResponse.json({ success: true, created, checked: invoices.length + tasks.length + projects.length + contracts.length + tickets.length + quotes.length + billingContracts.length });
+  return NextResponse.json({
+    success: true,
+    created,
+    routines: routineRun,
+    checked: invoices.length + tasks.length + projects.length + contracts.length + tickets.length + quotes.length + billingContracts.length + routineRun.checked,
+  });
 }
 
 export async function POST() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  return executeAutomations();
+  return executeAutomations(user.id);
 }
 
 export async function GET(request: NextRequest) {

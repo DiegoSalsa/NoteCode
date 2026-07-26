@@ -1,44 +1,49 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { changePassword } from "@/app/actions/auth";
 import { savePersonalSecret, updateProfile } from "@/app/actions/profile";
 import PasskeySettings from "@/components/PasskeySettings";
 import PersonalSecretCard from "@/components/PersonalSecretCard";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cached } from "@/lib/server-cache";
 
 export default async function ProfilePage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/");
+
+  return (
+    <Suspense fallback={<ProfileLoading />}>
+      <ProfileContent />
+    </Suspense>
+  );
+}
+
+function ProfileLoading() {
+  return (
+    <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+      <section className="space-y-1">
+        <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Perfil</h1>
+        <p className="text-[14px] text-neutral-400">Cargando tus datos y opciones de seguridad.</p>
+      </section>
+      <div className="grid animate-pulse gap-4 lg:grid-cols-2">
+        <div className="h-64 rounded-lg border border-white/10 bg-neutral-900" />
+        <div className="h-64 rounded-lg border border-white/10 bg-neutral-900" />
+      </div>
+    </div>
+  );
+}
+
+async function ProfileContent() {
   const user = await getCurrentUser();
   if (!user) redirect("/");
 
   let profile;
 
   try {
-    profile =
+    profile = await cached(`profile:${user.id}`, 60_000, async () =>
       (await prisma.userProfile.findUnique({
-      where: { userId: user.id },
-      include: {
-        personalSecrets: {
-          orderBy: { updatedAt: "desc" },
-          select: {
-            id: true,
-            name: true,
-            username: true,
-            notes: true,
-          },
-        },
-        passkeys: {
-          select: {
-            id: true,
-          },
-        },
-      },
-    })) ??
-      (await prisma.userProfile.create({
-        data: {
-          userId: user.id,
-          email: user.email,
-          displayName: user.name,
-        },
+        where: { userId: user.id },
         include: {
           personalSecrets: {
             orderBy: { updatedAt: "desc" },
@@ -55,7 +60,31 @@ export default async function ProfilePage() {
             },
           },
         },
-      }));
+      })) ??
+        prisma.userProfile.create({
+          data: {
+            userId: user.id,
+            email: user.email,
+            displayName: user.name,
+          },
+          include: {
+            personalSecrets: {
+              orderBy: { updatedAt: "desc" },
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                notes: true,
+              },
+            },
+            passkeys: {
+              select: {
+                id: true,
+              },
+            },
+          },
+        }),
+    );
   } catch (error) {
     console.error("Failed to load profile", error);
 

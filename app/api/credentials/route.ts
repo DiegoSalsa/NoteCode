@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
     if (credential.projectId) invalidateCache(`project:${credential.projectId}`);
     invalidateCache("credentials");
     invalidateCache("vault");
+    invalidateCache("dashboard:");
 
     return NextResponse.json({ ...credential, password: MASKED_SECRET }, { status: 201 });
   } catch {

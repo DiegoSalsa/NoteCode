@@ -54,8 +54,11 @@ export async function notify(input: {
   };
 
   try {
-    if (notification.userId) await sendPushToUser(notification.userId, payload);
-    else await sendPushToAll(payload);
+    const push = notification.userId ? sendPushToUser(notification.userId, payload) : sendPushToAll(payload);
+    await Promise.race([
+      push,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Push timeout after 3 seconds.")), 3000)),
+    ]);
   } catch (error) {
     console.error("[push:notify]", error);
   }

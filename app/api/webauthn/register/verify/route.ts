@@ -2,6 +2,7 @@ import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { invalidateCache } from "@/lib/server-cache";
 import {
   parseWebAuthnChallenge,
   WEBAUTHN_CHALLENGE_COOKIE,
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
       backedUp: credentialBackedUp,
     },
   });
+  invalidateCache(`profile:${user.id}`);
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(WEBAUTHN_CHALLENGE_COOKIE, "", {

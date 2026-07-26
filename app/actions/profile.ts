@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
 import { getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
+import { invalidateCache } from "@/lib/server-cache";
 
 async function requireUser() {
   const user = await getCurrentUser();
@@ -54,6 +55,8 @@ export async function updateProfile(formData: FormData) {
     },
   });
 
+  invalidateCache(`profile:${user.id}`);
+  invalidateCache("dashboard:");
   revalidatePath("/perfil");
   revalidatePath("/dashboard");
 }
@@ -79,6 +82,7 @@ export async function savePersonalSecret(formData: FormData) {
     },
   });
 
+  invalidateCache(`profile:${profile.userId}`);
   revalidatePath("/perfil");
 }
 
@@ -114,5 +118,6 @@ export async function deletePersonalSecret(formData: FormData) {
     },
   });
 
+  invalidateCache(`profile:${user.id}`);
   revalidatePath("/perfil");
 }
