@@ -61,6 +61,7 @@ prisma/migrations-manual/20260622_project_tasks_timeline.sql
 prisma/migrations-manual/20260723_full_erp.sql
 prisma/migrations-manual/20260723_erp_defaults.sql
 prisma/migrations-manual/20260723_push_notifications.sql
+prisma/migrations-manual/20260728_persistent_client_portal.sql
 ```
 
 The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.

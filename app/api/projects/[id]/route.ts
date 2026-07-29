@@ -36,15 +36,47 @@ export async function GET(
                         select: { id: true, name: true, category: true, size: true, updatedAt: true, createdAt: true },
                     },
                     invoices: {
-                        orderBy: { createdAt: "desc" },
-                        select: { id: true, number: true, amount: true, status: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true },
+                      orderBy: { createdAt: "desc" },
+                      select: { id: true, number: true, amount: true, status: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
+                    },
+                    assignments: {
+                      orderBy: { updatedAt: "desc" },
+                      include: { teamMember: { select: { id: true, name: true, role: true } } },
+                    },
+                    timeEntries: {
+                      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+                      take: 100,
+                      include: { teamMember: { select: { id: true, name: true, hourlyCost: true } } },
+                    },
+                    expenses: {
+                      where: { deletedAt: null },
+                      orderBy: { date: "desc" },
+                      take: 100,
+                      select: { id: true, description: true, amount: true, status: true, date: true },
+                    },
+                    tickets: {
+                      where: { deletedAt: null },
+                      orderBy: { updatedAt: "desc" },
+                      select: { id: true, number: true, subject: true, status: true, priority: true, updatedAt: true },
+                    },
+                    approvals: {
+                      orderBy: { requestedAt: "desc" },
+                      select: { id: true, title: true, type: true, status: true, requestedAt: true },
+                    },
+                    contracts: {
+                      where: { deletedAt: null },
+                      orderBy: { updatedAt: "desc" },
+                      select: { id: true, name: true, status: true, monthlyAmount: true },
+                    },
+                    quote: {
+                      select: { id: true, number: true, title: true, status: true },
                     },
                 },
             });
 
             if (!project) return null;
 
-            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices } = project;
+            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices, assignments, timeEntries, expenses, tickets, approvals, contracts, quote } = project;
             const timeline = [
                 ...statusLogs.map((log) => ({
                     id: `status:${log.id}`,
@@ -115,6 +147,23 @@ export async function GET(
                 documents,
                 invoice: invoices[0] ?? null,
                 invoices,
+                operations: {
+                    assignments,
+                    timeEntries,
+                    expenses,
+                    tickets,
+                    approvals,
+                    contracts,
+                    quote,
+                    totals: {
+                        hours: timeEntries.reduce((sum, entry) => sum + entry.hours, 0),
+                        approvedHours: timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0),
+                        laborCost: timeEntries.reduce((sum, entry) => sum + entry.hours * entry.teamMember.hourlyCost, 0),
+                        expenses: expenses.reduce((sum, expense) => sum + expense.amount, 0),
+                        invoiced: invoices.reduce((sum, invoice) => sum + invoice.amount, 0),
+                        collected: invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paid, payment) => paid + payment.amount, 0), 0),
+                    },
+                },
                 timeline: timeline.map((item) => ({ ...item, at: item.at.toISOString() })),
             };
         });
@@ -153,6 +202,7 @@ export async function PATCH(
         await syncProjectInvoice(project.id);
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");
+        invalidateCache("erp:");
         invalidateCache("vault");
         return NextResponse.json(project);
     } catch (error) {
@@ -172,6 +222,7 @@ export async function DELETE(
         });
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");
+        invalidateCache("erp:");
         invalidateCache("invoices");
         invalidateCache("vault");
         return NextResponse.json({ success: true });

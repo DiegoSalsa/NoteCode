@@ -39,6 +39,7 @@ export async function PATCH(
             },
         });
         invalidateCache(`project:${id}`);
+        invalidateCache("erp:");
         return NextResponse.json(item);
     } catch {
         return NextResponse.json({ error: "Failed" }, { status: 500 });
@@ -58,6 +59,7 @@ export async function DELETE(
             return NextResponse.json({ error: "Requirement not found" }, { status: 404 });
         }
         invalidateCache(`project:${id}`);
+        invalidateCache("erp:");
         return NextResponse.json({ success: true });
     } catch {
         return NextResponse.json({ error: "Failed" }, { status: 500 });

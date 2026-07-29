@@ -19,6 +19,7 @@ export async function PATCH(
             },
         });
         invalidateCache("projects:");
+        invalidateCache("erp:");
         invalidateCache("vault");
         return NextResponse.json(client);
     } catch (error) {
@@ -34,6 +35,7 @@ export async function DELETE(
         const { id } = await params;
         await prisma.client.update({ where: { id }, data: { deletedAt: new Date() } });
         invalidateCache("projects:");
+        invalidateCache("erp:");
         invalidateCache("vault");
         return NextResponse.json({ success: true });
     } catch (error) {

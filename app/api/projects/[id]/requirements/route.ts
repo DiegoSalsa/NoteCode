@@ -45,6 +45,7 @@ export async function POST(
             },
         });
         invalidateCache(`project:${id}`);
+        invalidateCache("erp:");
         return NextResponse.json(item, { status: 201 });
     } catch {
         return NextResponse.json({ error: "Failed" }, { status: 500 });

@@ -69,3 +69,19 @@ button:not(:disabled):active,
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
 }
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #0a0a0a !important;
+  }
+
+  .quote-print-document {
+    min-height: auto !important;
+  }
+}

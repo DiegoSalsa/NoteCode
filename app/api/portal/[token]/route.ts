@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/audit";
+import { invalidateCache } from "@/lib/server-cache";
 
 async function resolvePortal(rawToken: string) {
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
@@ -53,6 +54,7 @@ export async function GET(
   ]);
 
   return NextResponse.json({
+    portal: { label: access.label, lastUsedAt: access.lastUsedAt },
     client: { id: access.client.id, name: access.client.name, company: access.client.company },
     projects,
     invoices,
@@ -74,6 +76,8 @@ export async function POST(
 
   try {
     if (action === "decide-approval") {
+      invalidateCache("erp:");
+      invalidateCache("project:");
       const status = String(body.status ?? "");
       if (!["Aprobado", "Rechazado", "Cambios solicitados"].includes(status)) {
         return NextResponse.json({ error: "Decisión inválida." }, { status: 400 });
@@ -91,15 +95,22 @@ export async function POST(
     }
 
     if (action === "create-ticket") {
+      invalidateCache("erp:");
+      invalidateCache("project:");
       const subject = String(body.subject ?? "").trim();
       const description = String(body.description ?? "").trim();
       if (!subject || !description) return NextResponse.json({ error: "Asunto y descripción son obligatorios." }, { status: 400 });
+      const requestedProjectId = String(body.projectId ?? "").trim();
+      const project = requestedProjectId
+        ? await prisma.project.findFirst({ where: { id: requestedProjectId, clientId: access.clientId, deletedAt: null }, select: { id: true } })
+        : null;
+      if (requestedProjectId && !project) return NextResponse.json({ error: "El proyecto seleccionado no pertenece a este portal." }, { status: 400 });
       const count = await prisma.supportTicket.count();
       const ticket = await prisma.supportTicket.create({
         data: {
           number: `TKT-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`,
           clientId: access.clientId,
-          projectId: String(body.projectId ?? "") || null,
+          projectId: project?.id ?? null,
           subject,
           description,
           requester: access.client.name,
@@ -113,6 +124,8 @@ export async function POST(
     }
 
     if (action === "decide-quote") {
+      invalidateCache("erp:");
+      invalidateCache("project:");
       const quote = await prisma.quote.findFirst({ where: { id: String(body.quoteId), clientId: access.clientId, deletedAt: null } });
       if (!quote) return NextResponse.json({ error: "Cotización no encontrada." }, { status: 404 });
       const status = String(body.status) === "Aprobada" ? "Aprobada" : "Rechazada";
@@ -130,10 +143,14 @@ export async function POST(
     }
 
     if (action === "comment-ticket") {
+      invalidateCache("erp:");
+      invalidateCache("project:");
       const ticket = await prisma.supportTicket.findFirst({ where: { id: String(body.ticketId), clientId: access.clientId, deletedAt: null } });
       if (!ticket) return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
+      const commentBody = String(body.comment ?? "").trim();
+      if (!commentBody) return NextResponse.json({ error: "La respuesta no puede estar vacía." }, { status: 400 });
       const comment = await prisma.ticketComment.create({
-        data: { ticketId: ticket.id, author: access.client.name, body: String(body.comment ?? "").trim(), isPublic: true },
+        data: { ticketId: ticket.id, author: access.client.name, body: commentBody, isPublic: true },
       });
       await notify({ type: "ticket-comment", title: `Respuesta en ${ticket.number}`, message: `${access.client.name} agregó un comentario.`, href: "/erp?tab=soporte" });
       return NextResponse.json(comment, { status: 201 });

@@ -179,6 +179,8 @@ export async function POST(request: NextRequest) {
             metadata: { amount: invoice.amount, currency: invoice.currency, status: invoice.status },
         });
         invalidateCache("invoices");
+        invalidateCache("erp:");
+        invalidateCache("project:");
         invalidateCache("dashboard:");
         invalidateCache("reports:");
         invalidateCache("tax:");

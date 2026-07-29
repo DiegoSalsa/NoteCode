@@ -20,8 +20,9 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
   const isLogin = pathname === "/" || pathname.startsWith("/portal/");
+  const isDocument = pathname.startsWith("/cotizaciones/");
 
-  if (isLogin) {
+  if (isLogin || isDocument) {
     return <>{children}</>;
   }
 

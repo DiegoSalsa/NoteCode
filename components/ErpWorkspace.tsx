@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
-  Activity, BadgeDollarSign, Bell, BookOpenCheck, Box, BriefcaseBusiness, Building2, CheckCircle2,
+  Activity, ArrowUpRight, BadgeDollarSign, Bell, BookOpenCheck, Box, BriefcaseBusiness, Building2, CheckCircle2,
   ChevronRight, CircleDollarSign, Clock3, FileCheck2, FileSignature, Gauge,
-  Headphones, LayoutGrid, Plus, ReceiptText, RefreshCw, Search, Settings2,
-  ShieldCheck, ShoppingCart, Trash2, UserRound, UsersRound, WalletCards, X,
+  FolderKanban, Headphones, LayoutGrid, Plus, ReceiptText, RefreshCw, Search, Settings2,
+  ShieldCheck, ShoppingCart, SlidersHorizontal, Trash2, UserRound, UsersRound, WalletCards, X,
 } from "lucide-react";
 
 type Item = Record<string, unknown> & { id: string };
@@ -44,6 +45,10 @@ const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP
 const numberFormat = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 });
 
 const modules: Module[] = [
+  {
+    id: "proyectos", label: "Proyectos", resource: "projects", description: "Portafolio real del ERP con ejecución, equipo, costos, cobros y pendientes.", icon: FolderKanban,
+    fields: [],
+  },
   {
     id: "clientes", label: "Clientes", resource: "clients", description: "Ficha comercial, contactos y actividad.", icon: Building2,
     fields: [
@@ -243,6 +248,12 @@ const modules: Module[] = [
 
 const stages = ["Nuevo", "Contactado", "Reunión", "Propuesta", "Negociación", "Ganado", "Perdido"];
 
+const primaryModuleIds = new Set(["proyectos", "clientes", "crm", "cotizaciones", "horas", "asignaciones", "soporte", "aprobaciones"]);
+const projectScopedResources = new Set([
+  "clients", "opportunities", "contacts", "quotes", "team", "time-entries", "assignments",
+  "suppliers", "expenses", "payments", "contracts", "tickets", "approvals", "purchase-orders",
+]);
+
 function value(item: Item, path: string): unknown {
   return path.split(".").reduce<unknown>((current, segment) => {
     if (!current || typeof current !== "object") return undefined;
@@ -267,7 +278,8 @@ function Status({ children }: { children: unknown }) {
 }
 
 export default function ErpWorkspace({ currentUser }: { currentUser: { id: string; name: string; role: string } }) {
-  const [tab, setTab] = useState("resumen");
+  const [tab, setTab] = useState("proyectos");
+  const [projectId, setProjectId] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [options, setOptions] = useState<Options>(EMPTY_OPTIONS);
   const [overview, setOverview] = useState<Record<string, number>>({});
@@ -288,6 +300,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
   const activeRequest = useRef<AbortController | null>(null);
 
   const module = modules.find((entry) => entry.id === tab);
+  const projectScoped = Boolean(module && projectScopedResources.has(module.resource));
   const visibleModules = useMemo(() => modules.filter((entry) => {
     const financial = ["gastos", "proveedores", "pagos", "compras", "remuneraciones", "cuentas", "contabilidad"].includes(entry.id);
     const adminOnly = ["auditoria", "usuarios", "papelera"].includes(entry.id);
@@ -295,6 +308,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
     if (financial) return ["ADMIN", "MANAGER", "FINANCE"].includes(currentUser.role);
     return true;
   }), [currentUser.role]);
+  const primaryModules = visibleModules.filter((entry) => primaryModuleIds.has(entry.id));
+  const utilityModules = visibleModules.filter((entry) => !primaryModuleIds.has(entry.id));
 
   const loadOptions = useCallback(async (force = false) => {
     if (!force && optionsCache.current && Date.now() - optionsCache.current.savedAt < 120_000) {
@@ -310,7 +325,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
   }, []);
 
   const load = useCallback(async (force = false) => {
-    const cacheKey = `${tab}:${query.trim().toLowerCase()}`;
+    const cacheKey = `${tab}:${projectId}:${query.trim().toLowerCase()}`;
     const cached = dataCache.current.get(cacheKey);
     if (!force && cached && Date.now() - cached.savedAt < 30_000) {
       if (tab === "resumen") setOverview(cached.data as Record<string, number>);
@@ -333,13 +348,15 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
         setItems([]);
         dataCache.current.set(cacheKey, { savedAt: Date.now(), data });
       } else if (tab === "portal") {
-        const response = await fetch(`/api/erp/clients?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const response = await fetch(`/api/erp/portal-tokens?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         setItems(data);
         dataCache.current.set(cacheKey, { savedAt: Date.now(), data });
       } else if (module) {
-        const response = await fetch(`/api/erp/${module.resource}?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const params = new URLSearchParams({ q: query });
+        if (projectScoped && projectId) params.set("projectId", projectId);
+        const response = await fetch(`/api/erp/${module.resource}?${params.toString()}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
         const nextItems = Array.isArray(data) ? data : [];
@@ -352,27 +369,45 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
     } finally {
       if (activeRequest.current === controller) setLoading(false);
     }
-  }, [module, query, tab]);
+  }, [module, projectId, projectScoped, query, tab]);
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    const requestedProject = new URLSearchParams(window.location.search).get("projectId");
     if (requestedTab && (modules.some((entry) => entry.id === requestedTab) || requestedTab === "portal")) setTab(requestedTab);
+    if (requestedProject) setProjectId(requestedProject);
     const onHistory = () => {
-      const nextTab = new URLSearchParams(window.location.search).get("tab") || "resumen";
+      const params = new URLSearchParams(window.location.search);
+      const nextTab = params.get("tab") || "proyectos";
+      setProjectId(params.get("projectId") || "");
       if (modules.some((entry) => entry.id === nextTab) || nextTab === "portal" || nextTab === "resumen") setTab(nextTab);
     };
     window.addEventListener("popstate", onHistory);
     return () => window.removeEventListener("popstate", onHistory);
   }, []);
-  useEffect(() => { void load(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, [tab, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (projectScoped || tab === "proyectos") void loadOptions();
+  }, [loadOptions, projectScoped, tab]);
 
   function selectTab(nextTab: string) {
     setQuery("");
     setTab(nextTab);
     const url = new URL(window.location.href);
-    if (nextTab === "resumen") url.searchParams.delete("tab");
+    if (nextTab === "proyectos") url.searchParams.delete("tab");
     else url.searchParams.set("tab", nextTab);
+    const nextProjectScoped = projectScopedResources.has(modules.find((entry) => entry.id === nextTab)?.resource ?? "");
+    if (nextProjectScoped && projectId) url.searchParams.set("projectId", projectId);
+    else url.searchParams.delete("projectId");
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function selectProject(nextProjectId: string) {
+    setProjectId(nextProjectId);
+    const url = new URL(window.location.href);
+    if (nextProjectId) url.searchParams.set("projectId", nextProjectId);
+    else url.searchParams.delete("projectId");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
   async function openCreate() {
@@ -382,6 +417,9 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
     for (const field of module.fields) {
       if (field.defaultValue !== undefined) initial[field.key] = field.defaultValue;
       if (field.type === "date" && ["date", "paidAt", "startDate"].includes(field.key)) initial[field.key] = new Date().toISOString().slice(0, 10);
+    }
+    if (projectScoped && projectId && module.fields.some((field) => field.key === "projectId")) {
+      initial.projectId = projectId;
     }
     setForm(initial);
     setQuoteLines([{ description: "", quantity: 1, unitPrice: 0 }]);
@@ -455,11 +493,34 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       const url = `${window.location.origin}${data.portalUrl}`;
       setGeneratedPortal(url);
       await navigator.clipboard?.writeText(url);
+      dataCache.current.clear();
+      await load(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo crear el acceso.");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function managePortalToken(id: string, action: "rotate" | "revoke" | "restore") {
+    if (action === "rotate" && !confirm("Se invalidará el enlace anterior. ¿Quieres generar uno nuevo?")) return;
+    const response = await fetch(`/api/erp/portal-tokens/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setError(data.error ?? "No se pudo actualizar el acceso.");
+      return;
+    }
+    if (data.portalUrl) {
+      const url = `${window.location.origin}${data.portalUrl}`;
+      setGeneratedPortal(url);
+      await navigator.clipboard?.writeText(url);
+    }
+    dataCache.current.clear();
+    await load(true);
   }
 
   async function addActivity(opportunityId: string) {
@@ -520,13 +581,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
       </header>
 
       <div className="mt-5 flex gap-2 overflow-x-auto pb-2 scrollbar-hide lg:flex-wrap lg:overflow-visible lg:pb-0">
-        <button onClick={() => selectTab("resumen")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "resumen" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
-          <LayoutGrid size={14} /> Resumen
-        </button>
-        <button onClick={() => selectTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
-          <ShieldCheck size={14} /> Portal clientes
-        </button>
-        {visibleModules.map((entry) => {
+        {primaryModules.map((entry) => {
           const Icon = entry.icon;
           return (
             <button key={entry.id} onClick={() => selectTab(entry.id)} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === entry.id ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400 hover:text-neutral-200"}`}>
@@ -534,6 +589,26 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
             </button>
           );
         })}
+        <button onClick={() => selectTab("resumen")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "resumen" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
+          <LayoutGrid size={14} /> Resumen
+        </button>
+        {["ADMIN", "MANAGER"].includes(currentUser.role) && (
+          <button onClick={() => selectTab("portal")} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${tab === "portal" ? "bg-white text-neutral-950" : "border border-white/10 bg-neutral-900 text-neutral-400"}`}>
+            <ShieldCheck size={14} /> Portales
+          </button>
+        )}
+        <label className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${utilityModules.some((entry) => entry.id === tab) ? "border-white bg-white text-neutral-950" : "border-white/10 bg-neutral-900 text-neutral-400"}`}>
+          <SlidersHorizontal size={14} />
+          <select
+            aria-label="Más herramientas de gestión"
+            value={utilityModules.some((entry) => entry.id === tab) ? tab : ""}
+            onChange={(event) => event.target.value && selectTab(event.target.value)}
+            className="bg-transparent text-inherit outline-none"
+          >
+            <option value="" className="bg-neutral-900 text-neutral-300">Más herramientas</option>
+            {utilityModules.map((entry) => <option key={entry.id} value={entry.id} className="bg-neutral-900 text-neutral-300">{entry.label}</option>)}
+          </select>
+        </label>
       </div>
 
       {error && <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
@@ -548,6 +623,17 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
               <p className="mt-0.5 text-sm text-neutral-500">{tab === "portal" ? "Genera accesos seguros para cada cliente." : module?.description}</p>
             </div>
             <div className="flex gap-2">
+              {projectScoped && (
+                <select
+                  aria-label="Filtrar por proyecto"
+                  value={projectId}
+                  onChange={(event) => selectProject(event.target.value)}
+                  className="min-w-0 max-w-56 rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-white/20"
+                >
+                  <option value="">Todos los proyectos</option>
+                  {options.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
+              )}
               <div className="relative flex-1 sm:w-64">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void load()} placeholder="Buscar..." className="w-full rounded-lg border border-white/10 bg-neutral-900 py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-white/20" />
@@ -562,8 +648,13 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
 
           {loading ? <LoadingRows /> : tab === "crm" ? (
             <Pipeline items={filtered} onUpdate={(id, payload) => update("opportunities", id, payload)} onRemove={(id) => remove("opportunities", id)} onActivity={addActivity} />
+          ) : tab === "proyectos" ? (
+            <ProjectPortfolio items={filtered} onOpenModule={(nextTab, nextProjectId) => {
+              selectProject(nextProjectId);
+              selectTab(nextTab);
+            }} />
           ) : tab === "portal" ? (
-            <PortalList items={filtered} generated={generatedPortal} onGenerate={createPortal} />
+            <PortalList items={filtered} generated={generatedPortal} onGenerate={createPortal} onManage={managePortalToken} />
           ) : tab === "remuneraciones" ? (
             <PayrollList items={filtered} onUpdate={update} onRemove={remove} />
           ) : (
@@ -677,6 +768,77 @@ function Overview({ data, loading, onRefresh }: { data: Record<string, number>; 
       </div>
     </section>
   );
+}
+
+function ProjectPortfolio({ items, onOpenModule }: { items: Item[]; onOpenModule: (tab: string, projectId: string) => void }) {
+  if (!items.length) return <EmptyState label="Proyectos" />;
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-neutral-900/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-white">{items.length} proyectos conectados</p>
+          <p className="mt-1 text-xs text-neutral-500">Esta es la misma cartera de Proyectos; horas, equipo, costos, cobros y soporte se calculan desde sus registros reales.</p>
+        </div>
+        <Link href="/proyectos" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-white/5 hover:text-white">
+          Administrar proyectos <ArrowUpRight size={13} />
+        </Link>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {items.map((project) => {
+          const financials = project.financials && typeof project.financials === "object"
+            ? project.financials as Record<string, number>
+            : null;
+          const assignments = Array.isArray(project.assignments) ? project.assignments as Array<Item> : [];
+          const count = project._count && typeof project._count === "object" ? project._count as Record<string, number> : {};
+          return (
+            <article key={project.id} className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs text-neutral-500">{String(value(project, "client.name") ?? "Sin cliente")}</p>
+                  <Link href={`/proyectos/${project.id}`} className="mt-1 block truncate text-lg font-semibold text-white hover:underline">{String(project.name)}</Link>
+                  {Boolean(project.description) && <p className="mt-1 line-clamp-2 text-xs text-neutral-500">{String(project.description)}</p>}
+                </div>
+                <Status>{project.status}</Status>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <SmallProjectMetric label="Horas" value={numberFormat.format(Number(project.hours ?? 0))} />
+                <SmallProjectMetric label="Equipo" value={String(assignments.length)} />
+                <SmallProjectMetric label="Tickets abiertos" value={String(project.openTickets ?? 0)} tone={Number(project.openTickets) > 0 ? "warning" : undefined} />
+                <SmallProjectMetric label="Aprobaciones" value={String(project.pendingApprovals ?? 0)} tone={Number(project.pendingApprovals) > 0 ? "warning" : undefined} />
+              </div>
+              {financials && (
+                <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg border border-white/5 bg-neutral-950 p-3">
+                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Costos</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.totalCost ?? 0)}</p></div>
+                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Cobrado</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.collected ?? 0)}</p></div>
+                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Margen</p><p className={`mt-1 text-xs font-medium ${(financials.margin ?? 0) < 0 ? "text-red-300" : "text-emerald-300"}`}>{money.format(financials.margin ?? 0)}</p></div>
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {assignments.slice(0, 4).map((assignment) => (
+                  <span key={assignment.id} className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-neutral-400">
+                    {String(value(assignment, "teamMember.name"))}
+                  </span>
+                ))}
+                {assignments.length === 0 && <span className="text-[11px] text-amber-300">Sin equipo asignado</span>}
+                <span className="ml-auto text-[10px] text-neutral-600">{count.tasks ?? 0} tareas · {count.documents ?? 0} archivos</span>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-white/5 pt-4">
+                <Link href={`/proyectos/${project.id}`} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-white/5">Abrir proyecto</Link>
+                <button onClick={() => onOpenModule("horas", project.id)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-white">Horas</button>
+                {financials && <button onClick={() => onOpenModule("gastos", project.id)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-white">Costos</button>}
+                <button onClick={() => onOpenModule("soporte", project.id)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-white">Soporte</button>
+                <button onClick={() => onOpenModule("aprobaciones", project.id)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-white">Aprobaciones</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SmallProjectMetric({ label, value, tone }: { label: string; value: string; tone?: "warning" }) {
+  return <div className="rounded-lg bg-neutral-950 p-3"><p className={`text-base font-semibold ${tone === "warning" ? "text-amber-300" : "text-white"}`}>{value}</p><p className="mt-1 text-[9px] uppercase tracking-wide text-neutral-600">{label}</p></div>;
 }
 
 function Pipeline({ items, onUpdate, onRemove, onActivity }: { items: Item[]; onUpdate: (id: string, payload: Record<string, unknown>) => void; onRemove: (id: string) => void; onActivity: (id: string) => void }) {
@@ -795,8 +957,61 @@ function ModuleActions({ resource, item, onUpdate, onRemove, onTicketComment }: 
   );
 }
 
-function PortalList({ items, generated, onGenerate }: { items: Item[]; generated: string; onGenerate: (clientId: string) => void }) {
-  return <div className="mt-4 space-y-3">{generated && <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200"><p className="font-semibold">Acceso creado y copiado</p><p className="mt-1 break-all text-xs">{generated}</p><p className="mt-2 text-[11px] text-emerald-300/70">El enlace completo solo se muestra esta vez.</p></div>}<div className="overflow-hidden rounded-xl border border-white/10 bg-neutral-900">{items.map((item, index) => <div key={item.id} className={`flex items-center justify-between gap-3 p-4 ${index ? "border-t border-white/5" : ""}`}><Identity title={String(item.name)} subtitle={String(item.company ?? item.email ?? "Cliente")} meta={`${value(item, "_count.projects") ?? 0} proyectos`} /><button onClick={() => onGenerate(item.id)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-neutral-300 hover:bg-white/5">Generar acceso</button></div>)}</div></div>;
+function PortalList({ items, generated, onGenerate, onManage }: { items: Item[]; generated: string; onGenerate: (clientId: string) => void; onManage: (id: string, action: "rotate" | "revoke" | "restore") => void }) {
+  async function copyPath(path: string) {
+    await navigator.clipboard?.writeText(`${window.location.origin}${path}`);
+  }
+  return (
+    <div className="mt-4 space-y-3">
+      {generated && <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200"><p className="font-semibold">Acceso listo y copiado</p><p className="mt-1 break-all text-xs">{generated}</p><p className="mt-2 text-[11px] text-emerald-300/70">El enlace queda guardado aquí para volver a copiarlo o previsualizarlo.</p></div>}
+      <div className="space-y-3">
+        {items.map((client) => {
+          const portals = Array.isArray(client.portals) ? client.portals as Array<Item> : [];
+          return (
+            <article key={client.id} className="rounded-xl border border-white/10 bg-neutral-900 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <Identity
+                  title={String(client.company ?? client.name)}
+                  subtitle={String(client.name)}
+                  meta={`${value(client, "_count.projects") ?? 0} proyectos · ${value(client, "_count.quotes") ?? 0} cotizaciones · ${value(client, "_count.tickets") ?? 0} tickets`}
+                />
+                {portals.length === 0 && <button onClick={() => onGenerate(client.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-neutral-950">Crear portal</button>}
+              </div>
+              {portals.length > 0 && <div className="mt-4 space-y-2 border-t border-white/5 pt-4">
+                {portals.map((portal) => {
+                  const revoked = Boolean(portal.revokedAt);
+                  const expired = portal.expiresAt ? new Date(String(portal.expiresAt)) < new Date() : false;
+                  const active = !revoked && !expired;
+                  const path = typeof portal.portalPath === "string" ? portal.portalPath : null;
+                  return (
+                    <div key={portal.id} className="rounded-lg border border-white/5 bg-neutral-950 p-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-neutral-200">{String(portal.label)}</p><Status>{active ? "Activo" : revoked ? "Revocado" : "Vencido"}</Status></div>
+                          <p className="mt-1 text-[11px] text-neutral-600">
+                            {portal.lastUsedAt ? `Último acceso ${new Date(String(portal.lastUsedAt)).toLocaleString("es-CL")}` : "Aún no utilizado"}
+                            {portal.expiresAt ? ` · vence ${new Date(String(portal.expiresAt)).toLocaleDateString("es-CL")}` : " · sin vencimiento"}
+                          </p>
+                          {!path && <p className="mt-1 text-[11px] text-amber-300">Enlace antiguo: regenéralo una vez para poder consultarlo siempre.</p>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {path && active && <a href={path} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300">Ver como cliente <ArrowUpRight size={12} /></a>}
+                          {path && active && <button onClick={() => void copyPath(path)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Copiar</button>}
+                          <button onClick={() => onManage(portal.id, "rotate")} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">{path ? "Regenerar" : "Recuperar enlace"}</button>
+                          {active ? <button onClick={() => onManage(portal.id, "revoke")} className="rounded-md border border-red-500/20 px-2.5 py-1.5 text-xs text-red-300">Revocar</button> : <button onClick={() => onManage(portal.id, "restore")} className="rounded-md border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-300">Reactivar</button>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <button onClick={() => onGenerate(client.id)} className="text-xs text-neutral-500 hover:text-white">+ Crear otro acceso</button>
+              </div>}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function EmptyState({ label }: { label: string }) {

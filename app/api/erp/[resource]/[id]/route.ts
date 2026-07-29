@@ -1,7 +1,9 @@
+import { createHash, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canManage, canManageFinance, getCurrentUser } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { encryptString } from "@/lib/crypto";
 import { invalidateCache } from "@/lib/server-cache";
 
 function text(value: unknown) {
@@ -28,6 +30,7 @@ export async function PATCH(
   const { resource, id } = await params;
   const financialResources = ["expenses", "payments", "suppliers", "purchase-orders", "payroll", "payroll-entries", "accounts", "journal"];
   if (financialResources.includes(resource) && !canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para modificar esta sección." }, { status: 403 });
+  if (resource === "portal-tokens" && !canManage(user)) return NextResponse.json({ error: "No tienes permiso para administrar portales." }, { status: 403 });
   const body = await request.json() as Record<string, unknown>;
   const action = text(body.action);
 
@@ -60,6 +63,35 @@ export async function PATCH(
       return NextResponse.json(item);
     }
     switch (resource) {
+      case "portal-tokens": {
+        const portal = await prisma.clientPortalToken.findUnique({ where: { id } });
+        if (!portal) return NextResponse.json({ error: "Acceso no encontrado." }, { status: 404 });
+        if (action === "rotate") {
+          const rawToken = randomBytes(32).toString("base64url");
+          item = await prisma.clientPortalToken.update({
+            where: { id },
+            data: {
+              tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+              tokenCiphertext: encryptString(rawToken),
+              revokedAt: null,
+              expiresAt: body.expiresAt === undefined ? portal.expiresAt : date(body.expiresAt),
+              label: body.label === undefined ? portal.label : text(body.label) || "Portal principal",
+            },
+          });
+          await recordAudit({ action: "ROTATE", entityType: "ClientPortalToken", entityId: id, summary: "Enlace del portal regenerado" });
+          invalidateCache("erp:");
+          return NextResponse.json({ ...item, token: rawToken, portalUrl: `/portal/${rawToken}` });
+        }
+        item = await prisma.clientPortalToken.update({
+          where: { id },
+          data: {
+            label: body.label === undefined ? undefined : text(body.label) || "Portal principal",
+            expiresAt: body.expiresAt === undefined ? undefined : date(body.expiresAt),
+            revokedAt: action === "revoke" ? new Date() : action === "restore" ? null : undefined,
+          },
+        });
+        break;
+      }
       case "clients":
         item = await prisma.client.update({ where: { id }, data: {
           name: body.name === undefined ? undefined : text(body.name),
@@ -93,6 +125,7 @@ export async function PATCH(
           item = await prisma.opportunity.update({ where: { id }, data: { stage: "Ganado", probability: 100, clientId: client.id } });
           await recordAudit({ action: "CONVERT", entityType: "Opportunity", entityId: id, summary: `Convertida al proyecto ${project.name}`, metadata: { projectId: project.id } });
           invalidateCache("erp:");
+          invalidateCache("project:");
           return NextResponse.json({ opportunity: item, project });
         }
         item = await prisma.opportunity.update({ where: { id }, data: {
@@ -141,6 +174,7 @@ export async function PATCH(
           if (quote.opportunityId) await prisma.opportunity.update({ where: { id: quote.opportunityId }, data: { stage: "Ganado", probability: 100, clientId: quote.clientId } });
           await recordAudit({ action: "CONVERT", entityType: "Quote", entityId: id, summary: `Convertida al proyecto ${project.name}`, metadata: { projectId: project.id } });
           invalidateCache("erp:");
+          invalidateCache("project:");
           return NextResponse.json({ quote: item, project });
         }
         const status = body.status === undefined ? undefined : text(body.status);
@@ -305,6 +339,7 @@ export async function PATCH(
 
     await recordAudit({ action: "UPDATE", entityType: resource, entityId: item.id, summary: `Actualización en ${resource}` });
     invalidateCache("erp:");
+    invalidateCache("project:");
     return NextResponse.json(item);
   } catch (error) {
     console.error(`[erp:${resource}:${id}:patch]`, error);
@@ -359,6 +394,7 @@ export async function DELETE(
 
     await recordAudit({ action: "DELETE", entityType: resource, entityId: id, summary: `Enviado a papelera desde ${resource}` });
     invalidateCache("erp:");
+    invalidateCache("project:");
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error(`[erp:${resource}:${id}:delete]`, error);

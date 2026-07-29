@@ -66,6 +66,7 @@ export async function POST(
     });
 
     invalidateCache(`project:${id}`);
+    invalidateCache("erp:");
     invalidateCache("documents");
     return NextResponse.json(document, { status: 201 });
   } catch {

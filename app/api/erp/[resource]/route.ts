@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageFinance, getCurrentUser } from "@/lib/auth";
+import { canManage, canManageFinance, getCurrentUser } from "@/lib/auth";
 import { notify, recordAudit } from "@/lib/audit";
-import { encryptString } from "@/lib/crypto";
+import { decryptString, encryptString } from "@/lib/crypto";
 import { cached, invalidateCache } from "@/lib/server-cache";
 
 function text(value: unknown) {
@@ -47,9 +47,12 @@ export async function GET(
   const { resource } = await params;
   const hasFinanceAccess = canManageFinance(user);
   const financialResources = ["expenses", "payments", "suppliers", "purchase-orders", "payroll", "accounts", "journal"];
+  if (resource === "portal-tokens" && !canManage(user)) return NextResponse.json({ error: "No tienes permiso para administrar portales." }, { status: 403 });
   if (financialResources.includes(resource) && !hasFinanceAccess) return NextResponse.json({ error: "No tienes permiso para ver esta sección." }, { status: 403 });
   if (["audit", "users", "trash"].includes(resource) && user.role !== "ADMIN") return NextResponse.json({ error: "Solo administración puede ver esta sección." }, { status: 403 });
-  const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+  const searchParams = new URL(request.url).searchParams;
+  const q = searchParams.get("q")?.trim() ?? "";
+  const projectId = searchParams.get("projectId")?.trim() || null;
 
   try {
     switch (resource) {
@@ -137,27 +140,185 @@ export async function GET(
           ? options
           : { ...options, invoices: [], accounts: [], payrollPeriods: [] });
       }
+      case "portal-tokens": {
+        const clients = await prisma.client.findMany({
+          where: {
+            deletedAt: null,
+            ...(q ? {
+              OR: [
+                { name: { contains: q, mode: "insensitive" } },
+                { company: { contains: q, mode: "insensitive" } },
+              ],
+            } : {}),
+          },
+          orderBy: { name: "asc" },
+          include: {
+            portalTokens: { orderBy: { createdAt: "desc" } },
+            _count: { select: { projects: true, invoices: true, tickets: true, quotes: true } },
+          },
+        });
+
+        return NextResponse.json(clients.map((client) => ({
+          id: client.id,
+          name: client.name,
+          company: client.company,
+          email: client.email,
+          _count: client._count,
+          portals: client.portalTokens.map((token) => {
+            let rawToken: string | null = null;
+            if (token.tokenCiphertext) {
+              try {
+                rawToken = decryptString(token.tokenCiphertext);
+              } catch {
+                rawToken = null;
+              }
+            }
+            return {
+              id: token.id,
+              label: token.label,
+              portalPath: rawToken ? `/portal/${rawToken}` : null,
+              expiresAt: token.expiresAt,
+              lastUsedAt: token.lastUsedAt,
+              revokedAt: token.revokedAt,
+              createdAt: token.createdAt,
+              recoverable: Boolean(rawToken),
+            };
+          }),
+        })));
+      }
+      case "projects": {
+        const projects = await prisma.project.findMany({
+          where: {
+            deletedAt: null,
+            ...(q ? {
+              OR: [
+                { name: { contains: q, mode: "insensitive" } },
+                { client: { name: { contains: q, mode: "insensitive" } } },
+              ],
+            } : {}),
+          },
+          orderBy: { updatedAt: "desc" },
+          include: {
+            client: { select: { id: true, name: true } },
+            assignments: {
+              include: { teamMember: { select: { id: true, name: true, hourlyCost: true } } },
+            },
+            timeEntries: {
+              select: {
+                hours: true,
+                billable: true,
+                approved: true,
+                teamMember: { select: { hourlyCost: true } },
+              },
+            },
+            expenses: { where: { deletedAt: null }, select: { amount: true } },
+            invoices: {
+              where: { deletedAt: null },
+              select: { amount: true, status: true, payments: { select: { amount: true } } },
+            },
+            tickets: { where: { deletedAt: null }, select: { status: true } },
+            approvals: { select: { status: true } },
+            quote: { where: { deletedAt: null }, select: { id: true, number: true, status: true } },
+            _count: {
+              select: {
+                tasks: true,
+                requirements: true,
+                documents: true,
+                contracts: true,
+              },
+            },
+          },
+        });
+
+        return NextResponse.json(projects.map((project) => {
+          const hours = project.timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
+          const approvedHours = project.timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0);
+          const laborCost = project.timeEntries.reduce(
+            (sum, entry) => sum + entry.hours * entry.teamMember.hourlyCost,
+            0,
+          );
+          const expenses = project.expenses.reduce((sum, expense) => sum + expense.amount, 0);
+          const invoiced = project.invoices.reduce((sum, invoice) => sum + invoice.amount, 0);
+          const collected = project.invoices.reduce(
+            (sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
+            0,
+          );
+          const openTickets = project.tickets.filter((ticket) => !["Resuelto", "Cerrado"].includes(ticket.status)).length;
+          const pendingApprovals = project.approvals.filter((approval) => approval.status === "Pendiente").length;
+          const financials = hasFinanceAccess
+            ? {
+                laborCost,
+                expenses,
+                totalCost: laborCost + expenses,
+                invoiced,
+                collected,
+                margin: project.agreedAmount - laborCost - expenses,
+              }
+            : null;
+
+          return {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            status: project.status,
+            agreedAmount: hasFinanceAccess ? project.agreedAmount : null,
+            currency: project.currency,
+            budgetHours: project.budgetHours,
+            startDate: project.startDate,
+            targetDate: project.targetDate,
+            updatedAt: project.updatedAt,
+            client: project.client,
+            assignments: project.assignments.map((assignment) => ({
+              id: assignment.id,
+              role: assignment.role,
+              allocation: assignment.allocation,
+              teamMember: {
+                id: assignment.teamMember.id,
+                name: assignment.teamMember.name,
+              },
+            })),
+            quote: project.quote,
+            hours,
+            approvedHours,
+            openTickets,
+            pendingApprovals,
+            financials,
+            _count: project._count,
+          };
+        }));
+      }
       case "clients":
         return NextResponse.json(await prisma.client.findMany({
-          where: { deletedAt: null, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { company: { contains: q, mode: "insensitive" } }] } : {}) },
+          where: {
+            deletedAt: null,
+            ...(projectId ? { projects: { some: { id: projectId, deletedAt: null } } } : {}),
+            ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { company: { contains: q, mode: "insensitive" } }] } : {}),
+          },
           orderBy: { updatedAt: "desc" },
           include: { contacts: { where: { deletedAt: null } }, _count: { select: { projects: true, opportunities: true, invoices: true, tickets: true } } },
         }));
       case "opportunities":
         return NextResponse.json(await prisma.opportunity.findMany({
-          where: { deletedAt: null, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { company: { contains: q, mode: "insensitive" } }] } : {}) },
+          where: {
+            deletedAt: null,
+            ...(projectId ? { quotes: { some: { projectId, deletedAt: null } } } : {}),
+            ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { company: { contains: q, mode: "insensitive" } }] } : {}),
+          },
           orderBy: [{ expectedClose: "asc" }, { updatedAt: "desc" }],
           include: { client: { select: { id: true, name: true } }, activities: { orderBy: { createdAt: "desc" }, take: 5 }, _count: { select: { quotes: true } } },
         }));
       case "contacts":
         return NextResponse.json(await prisma.contact.findMany({
-          where: { deletedAt: null },
+          where: {
+            deletedAt: null,
+            ...(projectId ? { client: { projects: { some: { id: projectId, deletedAt: null } } } } : {}),
+          },
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
           include: { client: { select: { id: true, name: true } } },
         }));
       case "quotes": {
         const quotes = await prisma.quote.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: { createdAt: "desc" },
           include: { client: { select: { id: true, name: true } }, opportunity: { select: { id: true, name: true } }, project: { select: { id: true, name: true } }, items: { orderBy: { sortOrder: "asc" } } },
         });
@@ -165,7 +326,10 @@ export async function GET(
       }
       case "team":
         return NextResponse.json(await prisma.teamMember.findMany({
-          where: { deletedAt: null },
+          where: {
+            deletedAt: null,
+            ...(projectId ? { assignments: { some: { projectId } } } : {}),
+          },
           orderBy: [{ active: "desc" }, { name: "asc" }],
           include: {
             assignments: { include: { project: { select: { id: true, name: true } } } },
@@ -175,12 +339,14 @@ export async function GET(
         }));
       case "time-entries":
         return NextResponse.json(await prisma.timeEntry.findMany({
+          where: projectId ? { projectId } : undefined,
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
           take: 200,
           include: { project: { select: { id: true, name: true } }, teamMember: { select: { id: true, name: true, hourlyCost: true, billableRate: true } } },
         }));
       case "assignments":
         return NextResponse.json(await prisma.projectAssignment.findMany({
+          where: projectId ? { projectId } : undefined,
           orderBy: { updatedAt: "desc" },
           include: { project: { select: { id: true, name: true } }, teamMember: { select: { id: true, name: true } } },
         }));
@@ -190,34 +356,43 @@ export async function GET(
           include: { teamMember: { select: { id: true, name: true } } },
         }));
       case "suppliers":
-        return NextResponse.json(await prisma.supplier.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, include: { _count: { select: { expenses: true } } } }));
+        return NextResponse.json(await prisma.supplier.findMany({
+          where: {
+            deletedAt: null,
+            ...(projectId ? { expenses: { some: { projectId, deletedAt: null } } } : {}),
+          },
+          orderBy: { name: "asc" },
+          include: { _count: { select: { expenses: true } } },
+        }));
       case "expenses":
         return NextResponse.json(await prisma.expense.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: { date: "desc" },
           take: 200,
           include: { supplier: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
         }));
       case "payments":
         return NextResponse.json(await prisma.payment.findMany({
+          where: projectId ? { invoice: { projectId } } : undefined,
           orderBy: { paidAt: "desc" },
           take: 200,
           include: { invoice: { select: { id: true, number: true, client: true, amount: true, status: true } } },
         }));
       case "contracts":
         return NextResponse.json(await prisma.supportContract.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: { updatedAt: "desc" },
           include: { client: { select: { id: true, name: true } }, project: { select: { id: true, name: true } }, _count: { select: { tickets: true } } },
         }));
       case "tickets":
         return NextResponse.json(await prisma.supportTicket.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: [{ status: "asc" }, { priority: "asc" }, { updatedAt: "desc" }],
           include: { client: { select: { id: true, name: true } }, project: { select: { id: true, name: true } }, contract: { select: { id: true, name: true } }, comments: { orderBy: { createdAt: "desc" }, take: 5 } },
         }));
       case "approvals":
         return NextResponse.json(await prisma.clientApproval.findMany({
+          where: projectId ? { projectId } : undefined,
           orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
           include: { project: { select: { id: true, name: true, client: { select: { id: true, name: true } } } } },
         }));
@@ -238,7 +413,7 @@ export async function GET(
         }));
       case "purchase-orders": {
         const orders = await prisma.purchaseOrder.findMany({
-          where: { deletedAt: null },
+          where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: { createdAt: "desc" },
           include: { supplier: { select: { id: true, name: true } }, project: { select: { id: true, name: true } }, items: true },
         });
@@ -322,6 +497,7 @@ export async function POST(
   const { resource } = await params;
   const financialResources = ["expenses", "payments", "suppliers", "purchase-orders", "payroll", "accounts", "journal"];
   if (financialResources.includes(resource) && !canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para modificar esta sección." }, { status: 403 });
+  if (resource === "portal-tokens" && !canManage(user)) return NextResponse.json({ error: "No tienes permiso para administrar portales." }, { status: 403 });
   const body = await request.json() as Record<string, unknown>;
 
   try {
@@ -523,7 +699,8 @@ export async function POST(
         const rawToken = randomBytes(32).toString("base64url");
         const tokenHash = createHash("sha256").update(rawToken).digest("hex");
         const created = await prisma.clientPortalToken.create({ data: {
-          clientId: text(body.clientId), tokenHash, label: text(body.label) || "Portal principal",
+          clientId: text(body.clientId), tokenHash, tokenCiphertext: encryptString(rawToken),
+          label: text(body.label) || "Portal principal",
           expiresAt: date(body.expiresAt),
         } });
         await recordAudit({ action: "CREATE", entityType: "ClientPortalToken", entityId: created.id, summary: "Acceso de portal creado" });
@@ -606,6 +783,7 @@ export async function POST(
 
     await recordAudit({ action: "CREATE", entityType: resource, entityId: item.id, summary: `Creación en ${resource}` });
     invalidateCache("erp:");
+    invalidateCache("project:");
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
     console.error(`[erp:${resource}:post]`, error);

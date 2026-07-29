@@ -57,6 +57,7 @@ export async function POST(
     });
 
     invalidateCache(`project:${id}`);
+    invalidateCache("erp:");
     return NextResponse.json(task, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create task" }, { status: 500 });

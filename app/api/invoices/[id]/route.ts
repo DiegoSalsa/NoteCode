@@ -47,6 +47,8 @@ export async function PATCH(
             metadata: { before: { amount: current.amount, status: current.status }, after: { amount: invoice.amount, status: invoice.status } },
         });
         invalidateCache("invoices");
+        invalidateCache("erp:");
+        invalidateCache("project:");
         invalidateCache("dashboard:");
         invalidateCache("reports:");
         invalidateCache("tax:");
@@ -75,6 +77,8 @@ export async function DELETE(
             summary: `Factura ${invoice.number} enviada a papelera`,
         });
         invalidateCache("invoices");
+        invalidateCache("erp:");
+        invalidateCache("project:");
         invalidateCache("dashboard:");
         invalidateCache("reports:");
         invalidateCache("tax:");

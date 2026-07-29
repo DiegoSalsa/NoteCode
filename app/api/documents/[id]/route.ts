@@ -76,6 +76,7 @@ export async function DELETE(
 
     await prisma.document.update({ where: { id }, data: { deletedAt: new Date() } });
     invalidateCache("documents");
+    invalidateCache("erp:");
     if (document.projectId) {
       invalidateCache(`project:${document.projectId}`);
     }

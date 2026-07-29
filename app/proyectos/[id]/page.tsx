@@ -20,6 +20,11 @@ import {
     Upload,
     X,
     GripVertical,
+    BriefcaseBusiness,
+    Clock3,
+    Headphones,
+    ReceiptText,
+    Users,
 } from "lucide-react";
 
 type ProjectData = {
@@ -96,6 +101,17 @@ type TimelineItem = {
     at: string;
 };
 
+type ProjectOperations = {
+    assignments: Array<{ id: string; role: string; allocation: number; teamMember: { id: string; name: string; role: string } }>;
+    timeEntries: Array<{ id: string; description: string; hours: number; approved: boolean; date: string; teamMember: { id: string; name: string; hourlyCost: number } }>;
+    expenses: Array<{ id: string; description: string; amount: number; status: string; date: string }>;
+    tickets: Array<{ id: string; number: string; subject: string; status: string; priority: string; updatedAt: string }>;
+    approvals: Array<{ id: string; title: string; type: string; status: string; requestedAt: string }>;
+    contracts: Array<{ id: string; name: string; status: string; monthlyAmount: number }>;
+    quote: { id: string; number: string; title: string; status: string } | null;
+    totals: { hours: number; approvedHours: number; laborCost: number; expenses: number; invoiced: number; collected: number };
+};
+
 type ProjectDetailPayload = {
     project: ProjectData;
     statusLogs: StatusLog[];
@@ -105,6 +121,7 @@ type ProjectDetailPayload = {
     credentials: Credential[];
     notes: ProjectNote[];
     documents: ProjectDocument[];
+    operations: ProjectOperations;
     timeline: TimelineItem[];
 };
 
@@ -114,6 +131,8 @@ const REQ_CATEGORIES = ["Funcional", "Técnico", "UX/UI", "Seguridad"];
 const PRIORITIES = ["Alta", "Media", "Baja"];
 const TECH_CATEGORIES = ["Frontend", "Backend", "DevOps", "Base de Datos", "Herramientas"];
 const DOC_CATEGORIES = ["General", "Contratos", "Cotizaciones", "Diseño", "Legal"];
+
+const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 
 function formatBytes(size: number) {
     if (size < 1024) return `${size} B`;
@@ -165,6 +184,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [notes, setNotes] = useState<ProjectNote[]>(() => asArray<ProjectNote>(cached?.notes));
     const [documents, setDocuments] = useState<ProjectDocument[]>(() => asArray<ProjectDocument>(cached?.documents));
     const [timeline, setTimeline] = useState<TimelineItem[]>(() => asArray<TimelineItem>(cached?.timeline));
+    const [operations, setOperations] = useState<ProjectOperations | null>(() => cached?.operations ?? null);
     const [loading, setLoading] = useState(!cached);
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
     const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
@@ -218,6 +238,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             setNotes(asArray<ProjectNote>(data.notes));
             setDocuments(asArray<ProjectDocument>(data.documents));
             setTimeline(asArray<TimelineItem>(data.timeline));
+            setOperations(data.operations ?? null);
         } catch {
             setProject(null);
         }
@@ -265,6 +286,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 techs,
                 credentials: creds,
                 notes,
+                documents,
+                operations: operations!,
                 timeline,
             });
         }
@@ -288,6 +311,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     techs,
                     credentials: creds,
                     notes,
+                    documents,
+                    operations: operations!,
                     timeline,
                 });
             }
@@ -462,6 +487,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     const tabs = [
         { key: "overview", label: "General", count: null },
+        { key: "operations", label: "Operación", count: operations ? operations.assignments.length + operations.tickets.length : 0 },
         { key: "tasks", label: "Tareas", count: tasks.length },
         { key: "timeline", label: "Timeline", count: timeline.length },
         { key: "requirements", label: "Requisitos", count: requirements.length },
@@ -553,6 +579,45 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         {statusLogs.length === 0 && (
                             <p className="text-[13px] text-neutral-500 py-4 text-center">Sin cambios de estado registrados.</p>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {tab === "operations" && operations && (
+                <div className="space-y-5">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                        <OperationMetric label="Horas" value={`${operations.totals.hours.toLocaleString("es-CL")} h`} icon={Clock3} />
+                        <OperationMetric label="Equipo" value={String(operations.assignments.length)} icon={Users} />
+                        <OperationMetric label="Costo horas" value={money.format(operations.totals.laborCost)} icon={ReceiptText} />
+                        <OperationMetric label="Otros costos" value={money.format(operations.totals.expenses)} icon={ReceiptText} />
+                        <OperationMetric label="Facturado" value={money.format(operations.totals.invoiced)} icon={BriefcaseBusiness} />
+                        <OperationMetric label="Cobrado" value={money.format(operations.totals.collected)} icon={Check} />
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <section className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+                            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">Equipo y dedicación</h3><p className="mt-1 text-xs text-neutral-500">Asignaciones compartidas con Gestión.</p></div><Link href={`/erp?tab=asignaciones&projectId=${id}`} className="text-xs text-neutral-400 hover:text-white">Administrar →</Link></div>
+                            <div className="mt-4 space-y-2">{operations.assignments.length ? operations.assignments.map((assignment) => <div key={assignment.id} className="flex items-center justify-between rounded-lg bg-neutral-950 px-3 py-3"><div><p className="text-sm font-medium text-neutral-200">{assignment.teamMember.name}</p><p className="mt-0.5 text-xs text-neutral-500">{assignment.role || assignment.teamMember.role}</p></div><span className="text-xs text-neutral-400">{assignment.allocation}%</span></div>) : <p className="py-5 text-center text-xs text-amber-300">Este proyecto todavía no tiene equipo asignado.</p>}</div>
+                        </section>
+
+                        <section className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+                            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">Horas recientes</h3><p className="mt-1 text-xs text-neutral-500">{operations.totals.approvedHours.toLocaleString("es-CL")} h aprobadas.</p></div><Link href={`/erp?tab=horas&projectId=${id}`} className="text-xs text-neutral-400 hover:text-white">Ver todas →</Link></div>
+                            <div className="mt-4 space-y-2">{operations.timeEntries.slice(0, 5).map((entry) => <div key={entry.id} className="flex items-center justify-between gap-3 border-b border-white/5 py-2 last:border-0"><div className="min-w-0"><p className="truncate text-xs text-neutral-300">{entry.description}</p><p className="mt-0.5 text-[11px] text-neutral-600">{entry.teamMember.name} · {new Date(entry.date).toLocaleDateString("es-CL")}</p></div><span className="shrink-0 text-xs font-medium text-neutral-300">{entry.hours} h</span></div>)}{operations.timeEntries.length === 0 && <p className="py-5 text-center text-xs text-neutral-500">Sin horas registradas.</p>}</div>
+                        </section>
+
+                        <section className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+                            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">Soporte</h3><p className="mt-1 text-xs text-neutral-500">Solicitudes asociadas a este proyecto.</p></div><Link href={`/erp?tab=soporte&projectId=${id}`} className="text-xs text-neutral-400 hover:text-white">Abrir gestión →</Link></div>
+                            <div className="mt-4 space-y-2">{operations.tickets.slice(0, 5).map((ticket) => <div key={ticket.id} className="flex items-center justify-between gap-3 rounded-lg bg-neutral-950 px-3 py-3"><div className="min-w-0"><p className="truncate text-xs font-medium text-neutral-300">{ticket.number} · {ticket.subject}</p><p className="mt-0.5 text-[11px] text-neutral-600">{ticket.priority}</p></div><span className="shrink-0 text-[11px] text-neutral-400">{ticket.status}</span></div>)}{operations.tickets.length === 0 && <p className="py-5 text-center text-xs text-neutral-500">Sin tickets para este proyecto.</p>}</div>
+                        </section>
+
+                        <section className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+                            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">Cliente y comercial</h3><p className="mt-1 text-xs text-neutral-500">Cotización, aprobaciones y contratos conectados.</p></div><Link href={`/erp?tab=aprobaciones&projectId=${id}`} className="text-xs text-neutral-400 hover:text-white">Ver decisiones →</Link></div>
+                            <div className="mt-4 space-y-2">
+                                {operations.quote && <Link href={`/cotizaciones/${operations.quote.id}`} className="flex items-center justify-between rounded-lg bg-neutral-950 px-3 py-3 text-xs text-neutral-300 hover:text-white"><span>{operations.quote.number} · {operations.quote.title}</span><span>{operations.quote.status}</span></Link>}
+                                {operations.approvals.slice(0, 4).map((approval) => <div key={approval.id} className="flex items-center justify-between gap-3 rounded-lg bg-neutral-950 px-3 py-3"><div><p className="text-xs font-medium text-neutral-300">{approval.title}</p><p className="mt-0.5 text-[11px] text-neutral-600">{approval.type}</p></div><span className="text-[11px] text-neutral-400">{approval.status}</span></div>)}
+                                {!operations.quote && operations.approvals.length === 0 && <p className="py-5 text-center text-xs text-neutral-500">Sin cotización ni aprobaciones asociadas.</p>}
+                            </div>
+                        </section>
                     </div>
                 </div>
             )}
@@ -972,4 +1037,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             )}
         </div>
     );
+}
+
+function OperationMetric({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Clock3 }) {
+    return <div className="rounded-xl border border-white/10 bg-neutral-900 p-4"><Icon size={15} className="text-neutral-600" /><p className="mt-3 text-base font-semibold text-white">{value}</p><p className="mt-1 text-[10px] uppercase tracking-wide text-neutral-600">{label}</p></div>;
 }

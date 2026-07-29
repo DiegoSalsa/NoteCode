@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
         });
         await syncProjectInvoice(project.id);
         invalidateCache("projects:");
+        invalidateCache("erp:");
         invalidateCache("vault");
         invalidateCache("dashboard:");
         invalidateCache("reports:");

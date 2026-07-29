@@ -47,6 +47,7 @@ export async function PATCH(
     });
 
     invalidateCache(`project:${id}`);
+    invalidateCache("erp:");
     return NextResponse.json(task);
   } catch {
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
@@ -65,6 +66,7 @@ export async function DELETE(
     if (result.count === 0) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
     invalidateCache(`project:${id}`);
+    invalidateCache("erp:");
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete task" }, { status: 500 });

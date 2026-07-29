@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
             },
         });
         invalidateCache("projects:");
+        invalidateCache("erp:");
         return NextResponse.json(client, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: "Failed to create client" }, { status: 500 });

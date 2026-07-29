@@ -150,6 +150,8 @@ export async function POST(request: NextRequest) {
     });
 
     invalidateCache("documents");
+    invalidateCache("erp:");
+    invalidateCache("project:");
     await recordAudit({
       action: "CREATE",
       entityType: "Document",

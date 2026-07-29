@@ -40,6 +40,7 @@ export async function POST(
         await syncProjectInvoice(id);
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");
+        invalidateCache("erp:");
 
         return NextResponse.json(log, { status: 201 });
     } catch {
