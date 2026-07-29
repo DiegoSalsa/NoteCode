@@ -16,6 +16,7 @@ import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Client = { id: string; name: string };
+type TeamMember = { id: string; name: string };
 
 type Project = {
     id: string;
@@ -23,6 +24,11 @@ type Project = {
     description: string | null;
     status: string;
     agreedAmount: number;
+    budgetHours: number;
+    budgetCost: number;
+    startDate: string | null;
+    targetDate: string | null;
+    ownerId: string | null;
     clientId: string;
     createdAt: string;
     updatedAt: string;
@@ -32,6 +38,7 @@ type Project = {
 type ProjectsPayload = {
     projects: Project[];
     clients: Client[];
+    team: TeamMember[];
     nextSkip: number;
     hasMore: boolean;
     total: number;
@@ -60,6 +67,7 @@ export default function ProyectosPage() {
     const cached = useCachedJson<Partial<ProjectsPayload>>("projects:init::0:25");
     const [projects, setProjects] = useState<Project[]>(() => Array.isArray(cached?.projects) ? cached.projects : []);
     const [clients, setClients] = useState<Client[]>(() => Array.isArray(cached?.clients) ? cached.clients : []);
+    const [team, setTeam] = useState<TeamMember[]>(() => Array.isArray(cached?.team) ? cached.team : []);
     const [loading, setLoading] = useState(!cached);
     const [loadingMore, setLoadingMore] = useState(false);
     const [nextSkip, setNextSkip] = useState(cached?.nextSkip ?? projects.length);
@@ -71,7 +79,7 @@ export default function ProyectosPage() {
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Project | null>(null);
-    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
+    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "" });
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
 
@@ -80,6 +88,7 @@ export default function ProyectosPage() {
         const cachedProjects = Array.isArray(cached.projects) ? cached.projects : [];
         setProjects(cachedProjects);
         setClients(Array.isArray(cached.clients) ? cached.clients : []);
+        setTeam(Array.isArray(cached.team) ? cached.team : []);
         setNextSkip(cached.nextSkip ?? cachedProjects.length);
         setHasMore(Boolean(cached.hasMore));
         setTotal(cached.total ?? cachedProjects.length);
@@ -94,6 +103,7 @@ export default function ProyectosPage() {
         setError("");
         setProjects((current) => append ? [...current, ...items] : items);
         setClients(Array.isArray(data.clients) ? data.clients : []);
+        setTeam(Array.isArray(data.team) ? data.team : []);
         setNextSkip(data.nextSkip ?? skip + items.length);
         setHasMore(Boolean(data.hasMore));
         setTotal(data.total ?? items.length);
@@ -115,13 +125,13 @@ export default function ProyectosPage() {
 
     function openCreate() {
         setEditing(null);
-        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "" });
+        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "" });
         setModalOpen(true);
     }
 
     function openEdit(p: Project) {
         setEditing(p);
-        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId, clientName: p.client.name, agreedAmount: String(p.agreedAmount || "") });
+        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId, clientName: p.client.name, agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "" });
         setModalOpen(true);
     }
 
@@ -130,22 +140,24 @@ export default function ProyectosPage() {
         setSaving(true);
         try {
             if (editing) {
-                await fetch(`/api/projects/${editing.id}`, {
+                const response = await fetch(`/api/projects/${editing.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0 }),
+                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
                 });
+                if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "No se pudo actualizar el proyecto.");
             } else {
-                await fetch("/api/projects", {
+                const response = await fetch("/api/projects", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0 }),
+                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
                 });
+                if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "No se pudo crear el proyecto.");
             }
             setModalOpen(false);
             await fetchData();
         } catch (err) {
-            console.error(err);
+            setError(err instanceof Error ? err.message : "No se pudo guardar el proyecto.");
         } finally {
             setSaving(false);
         }
@@ -283,7 +295,7 @@ export default function ProyectosPage() {
             {/* Modal */}
             {modalOpen && (
                 <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
-                    <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
+                    <div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-[17px] font-semibold text-neutral-100">
                                 {editing ? "Editar Proyecto" : "Nuevo Proyecto"}
@@ -349,6 +361,27 @@ export default function ProyectosPage() {
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
                                     placeholder="Ej: 1500000"
                                 />
+                            </div>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div>
+                                    <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Responsable</label>
+                                    <select value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100">
+                                        <option value="">Sin asignar</option>
+                                        {team.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Horas presupuestadas</label>
+                                    <input type="number" min="0" step="0.5" value={form.budgetHours} onChange={(e) => setForm({ ...form, budgetHours: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
+                                </div>
+                                <div>
+                                    <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Costo presupuestado ($)</label>
+                                    <input type="number" min="0" step="1" value={form.budgetCost} onChange={(e) => setForm({ ...form, budgetCost: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label className="text-[13px] font-medium text-neutral-300">Inicio<input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[13px] text-neutral-100" /></label>
+                                    <label className="text-[13px] font-medium text-neutral-300">Objetivo<input type="date" value={form.targetDate} onChange={(e) => setForm({ ...form, targetDate: e.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[13px] text-neutral-100" /></label>
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Estado</label>

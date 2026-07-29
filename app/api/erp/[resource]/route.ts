@@ -5,6 +5,7 @@ import { canManage, canManageFinance, getCurrentUser } from "@/lib/auth";
 import { notify, recordAudit } from "@/lib/audit";
 import { decryptString, encryptString } from "@/lib/crypto";
 import { cached, invalidateCache } from "@/lib/server-cache";
+import { assertProjectBelongsToClient } from "@/lib/commercial";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -124,9 +125,10 @@ export async function GET(
       }
       case "options": {
         const options = await cached("erp:options", 120_000, async () => {
-          const [clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods] = await Promise.all([
+          const [clients, projects, tasks, team, suppliers, invoices, opportunities, accounts, payrollPeriods] = await Promise.all([
             prisma.client.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true, company: true } }),
             prisma.project.findMany({ where: { deletedAt: null }, orderBy: { updatedAt: "desc" }, take: 300, select: { id: true, name: true, clientId: true } }),
+            prisma.projectTask.findMany({ orderBy: { updatedAt: "desc" }, take: 500, select: { id: true, title: true, projectId: true, status: true } }),
             prisma.teamMember.findMany({ where: { deletedAt: null, active: true }, orderBy: { name: "asc" }, take: 200, select: { id: true, name: true } }),
             prisma.supplier.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true } }),
             prisma.invoice.findMany({ where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 300, select: { id: true, number: true, client: true, amount: true, status: true } }),
@@ -134,7 +136,7 @@ export async function GET(
             prisma.account.findMany({ where: { active: true }, orderBy: { code: "asc" }, take: 300, select: { id: true, name: true, code: true } }),
             prisma.payrollPeriod.findMany({ where: { deletedAt: null }, orderBy: { startDate: "desc" }, take: 120, select: { id: true, name: true } }),
           ]);
-          return { clients, projects, team, suppliers, invoices, opportunities, accounts, payrollPeriods };
+          return { clients, projects, tasks, team, suppliers, invoices, opportunities, accounts, payrollPeriods };
         });
         return NextResponse.json(hasFinanceAccess
           ? options
@@ -153,7 +155,14 @@ export async function GET(
           },
           orderBy: { name: "asc" },
           include: {
-            portalTokens: { orderBy: { createdAt: "desc" } },
+            projects: { where: { deletedAt: null }, select: { id: true, name: true, status: true }, orderBy: { updatedAt: "desc" } },
+            portalTokens: {
+              orderBy: { createdAt: "desc" },
+              include: {
+                project: { select: { id: true, name: true } },
+                accessLogs: { orderBy: { accessedAt: "desc" }, take: 10 },
+              },
+            },
             _count: { select: { projects: true, invoices: true, tickets: true, quotes: true } },
           },
         });
@@ -163,6 +172,7 @@ export async function GET(
           name: client.name,
           company: client.company,
           email: client.email,
+          projects: client.projects,
           _count: client._count,
           portals: client.portalTokens.map((token) => {
             let rawToken: string | null = null;
@@ -176,12 +186,16 @@ export async function GET(
             return {
               id: token.id,
               label: token.label,
+              project: token.project,
               portalPath: rawToken ? `/portal/${rawToken}` : null,
               expiresAt: token.expiresAt,
               lastUsedAt: token.lastUsedAt,
               revokedAt: token.revokedAt,
               createdAt: token.createdAt,
               recoverable: Boolean(rawToken),
+              visits: token.accessLogs.filter((log) => !log.isPreview).length,
+              previews: token.accessLogs.filter((log) => log.isPreview).length,
+              recentAccess: token.accessLogs,
             };
           }),
         })));
@@ -218,7 +232,7 @@ export async function GET(
             },
             tickets: { where: { deletedAt: null }, select: { status: true } },
             approvals: { select: { status: true } },
-            quote: { where: { deletedAt: null }, select: { id: true, number: true, status: true } },
+            quotes: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, select: { id: true, number: true, status: true, version: true } },
             _count: {
               select: {
                 tasks: true,
@@ -277,7 +291,8 @@ export async function GET(
                 name: assignment.teamMember.name,
               },
             })),
-            quote: project.quote,
+            quote: project.quotes[0] ?? null,
+            quotes: project.quotes,
             hours,
             approvedHours,
             openTickets,
@@ -342,7 +357,11 @@ export async function GET(
           where: projectId ? { projectId } : undefined,
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
           take: 200,
-          include: { project: { select: { id: true, name: true } }, teamMember: { select: { id: true, name: true, hourlyCost: true, billableRate: true } } },
+          include: {
+            project: { select: { id: true, name: true } },
+            task: { select: { id: true, title: true, status: true } },
+            teamMember: { select: { id: true, name: true, hourlyCost: true, billableRate: true } },
+          },
         }));
       case "assignments":
         return NextResponse.json(await prisma.projectAssignment.findMany({
@@ -549,6 +568,10 @@ export async function POST(
         if (error) return NextResponse.json({ error }, { status: 400 });
         const items = Array.isArray(body.items) ? body.items as Array<Record<string, unknown>> : [];
         if (!items.length) return NextResponse.json({ error: "La cotización necesita al menos un ítem." }, { status: 400 });
+        if (items.some((line) => !text(line.description))) {
+          return NextResponse.json({ error: "Todos los ítems necesitan descripción." }, { status: 400 });
+        }
+        await assertProjectBelongsToClient(text(body.projectId) || null, text(body.clientId));
         const numberValue = text(body.number) || await nextNumber("COT", await prisma.quote.count());
         item = await prisma.quote.create({
           data: {
@@ -598,8 +621,18 @@ export async function POST(
       case "time-entries": {
         const error = required(body, ["projectId", "teamMemberId", "description", "date"]);
         if (error) return NextResponse.json({ error }, { status: 400 });
+        const selectedTaskId = text(body.taskId) || null;
+        if (selectedTaskId) {
+          const selectedTask = await prisma.projectTask.findFirst({
+            where: { id: selectedTaskId, projectId: text(body.projectId) },
+            select: { id: true },
+          });
+          if (!selectedTask) {
+            return NextResponse.json({ error: "La tarea no pertenece al proyecto seleccionado." }, { status: 400 });
+          }
+        }
         item = await prisma.timeEntry.create({ data: {
-          projectId: text(body.projectId), teamMemberId: text(body.teamMemberId), taskId: text(body.taskId) || null,
+          projectId: text(body.projectId), teamMemberId: text(body.teamMemberId), taskId: selectedTaskId,
           description: text(body.description), date: date(body.date)!, hours: Math.max(0.01, number(body.hours)),
           billable: body.billable !== false, approved: Boolean(body.approved),
         } });
@@ -647,6 +680,7 @@ export async function POST(
       case "contracts": {
         const error = required(body, ["clientId", "name", "startDate"]);
         if (error) return NextResponse.json({ error }, { status: 400 });
+        await assertProjectBelongsToClient(text(body.projectId) || null, text(body.clientId));
         item = await prisma.supportContract.create({ data: {
           clientId: text(body.clientId), projectId: text(body.projectId) || null, name: text(body.name),
           status: text(body.status) || "Activo", billingCycle: text(body.billingCycle) || "Mensual",
@@ -661,7 +695,11 @@ export async function POST(
       case "tickets": {
         const error = required(body, ["clientId", "subject", "description"]);
         if (error) return NextResponse.json({ error }, { status: 400 });
+        await assertProjectBelongsToClient(text(body.projectId) || null, text(body.clientId));
         const contract = text(body.contractId) ? await prisma.supportContract.findUnique({ where: { id: text(body.contractId) } }) : null;
+        if (contract && (contract.clientId !== text(body.clientId) || (text(body.projectId) && contract.projectId && contract.projectId !== text(body.projectId)))) {
+          return NextResponse.json({ error: "El contrato no corresponde al cliente o proyecto seleccionado." }, { status: 400 });
+        }
         const createdAt = new Date();
         item = await prisma.supportTicket.create({ data: {
           number: text(body.number) || await nextNumber("TKT", await prisma.supportTicket.count()),
@@ -696,10 +734,11 @@ export async function POST(
       case "portal-tokens": {
         const error = required(body, ["clientId"]);
         if (error) return NextResponse.json({ error }, { status: 400 });
+        const scopedProject = await assertProjectBelongsToClient(text(body.projectId) || null, text(body.clientId));
         const rawToken = randomBytes(32).toString("base64url");
         const tokenHash = createHash("sha256").update(rawToken).digest("hex");
         const created = await prisma.clientPortalToken.create({ data: {
-          clientId: text(body.clientId), tokenHash, tokenCiphertext: encryptString(rawToken),
+          clientId: text(body.clientId), projectId: scopedProject?.id ?? null, tokenHash, tokenCiphertext: encryptString(rawToken),
           label: text(body.label) || "Portal principal",
           expiresAt: date(body.expiresAt),
         } });

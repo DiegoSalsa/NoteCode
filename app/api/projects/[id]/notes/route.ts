@@ -8,8 +8,8 @@ export async function GET(
 ) {
     try {
         const { id } = await params;
-        const items = await prisma.projectNote.findMany({
-            where: { projectId: id },
+        const items = await prisma.note.findMany({
+            where: { projectId: id, deletedAt: null },
             orderBy: { updatedAt: "desc" },
         });
         return NextResponse.json(items);
@@ -25,11 +25,12 @@ export async function POST(
     try {
         const { id } = await params;
         const body = await request.json();
-        const item = await prisma.projectNote.create({
+        const item = await prisma.note.create({
             data: {
                 projectId: id,
                 title: body.title,
                 content: body.content || "",
+                folder: "Proyecto",
             },
         });
         invalidateCache(`project:${id}`);

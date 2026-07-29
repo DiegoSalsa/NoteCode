@@ -715,9 +715,10 @@ export function createTools(context: GilbertoToolContext = {}) {
             if (!resolved.project) return resolved;
 
             const q = query.trim();
-            const notes = await prisma.projectNote.findMany({
+            const notes = await prisma.note.findMany({
                 where: {
                     projectId: resolved.project.id,
+                    deletedAt: null,
                     ...(q
                         ? {
                               OR: [
@@ -1413,11 +1414,12 @@ export function createTools(context: GilbertoToolContext = {}) {
                 });
             }
 
-            const note = await prisma.projectNote.create({
+            const note = await prisma.note.create({
                 data: {
                     projectId: resolved.project.id,
                     title,
                     content,
+                    folder: "Proyecto",
                 },
                 select: {
                     id: true,

@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
                         title: true,
                         content: true,
                         folder: true,
+                        project: { select: { id: true, name: true } },
                         updatedAt: true,
                         createdAt: true,
                     },
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
                 title: body.title,
                 content: body.content || "",
                 folder: body.folder || "General",
+                projectId: body.projectId || null,
             },
         });
         invalidateCache("notes");

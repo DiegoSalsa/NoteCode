@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncProjectInvoice } from "@/lib/projects";
 import { invalidateCache } from "@/lib/server-cache";
+import { canManage, getCurrentUser } from "@/lib/auth";
 
 export async function GET(
     _request: NextRequest,
@@ -23,6 +24,9 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para cambiar el estado del proyecto." }, { status: 403 });
     try {
         const { id } = await params;
         const body = await request.json();

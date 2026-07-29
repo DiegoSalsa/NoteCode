@@ -8,7 +8,10 @@ export async function DELETE(
 ) {
     try {
         const { id, noteId } = await params;
-        await prisma.projectNote.delete({ where: { id: noteId } });
+        await prisma.note.updateMany({
+            where: { id: noteId, projectId: id },
+            data: { deletedAt: new Date() },
+        });
         invalidateCache(`project:${id}`);
         return NextResponse.json({ success: true });
     } catch {

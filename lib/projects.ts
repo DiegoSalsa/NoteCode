@@ -37,10 +37,27 @@ export function calculateNetWithoutVat(amount: number) {
 export async function syncProjectInvoice(projectId: string) {
   const project = await prisma.project.findUnique({
     where: { id: projectId, deletedAt: null },
-    include: { client: { select: { name: true } } },
+    include: {
+      client: { select: { name: true } },
+      quotes: {
+        where: { deletedAt: null, status: "Aprobada" },
+        orderBy: [{ approvedAt: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        include: { items: true },
+      },
+    },
   });
 
-  if (!project || project.status !== COMPLETED_STATUS || project.agreedAmount <= 0) return;
+  if (!project || project.status !== COMPLETED_STATUS) return;
+  const approvedQuote = project.quotes[0];
+  const quoteSubtotal = approvedQuote?.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) ?? 0;
+  const billingAmount = approvedQuote
+    ? quoteSubtotal * (1 - approvedQuote.discount / 100) * (1 + approvedQuote.taxRate / 100)
+    : project.agreedAmount;
+  if (billingAmount <= 0) return;
+  if (approvedQuote && Math.abs(project.agreedAmount - billingAmount) > 0.01) {
+    await prisma.project.update({ where: { id: project.id }, data: { agreedAmount: billingAmount } });
+  }
 
   const invoiceNumber = `PROJ-${project.createdAt.getFullYear()}-${project.id.slice(0, 8).toUpperCase()}`;
   const dueDate = new Date();
@@ -53,17 +70,22 @@ export async function syncProjectInvoice(projectId: string) {
       clientId: project.clientId,
       number: invoiceNumber,
       client: project.client.name,
-      amount: project.agreedAmount,
-      netAmount: calculateNetWithoutVat(project.agreedAmount),
-      dueDate,
+      amount: billingAmount,
+      netAmount: calculateNetWithoutVat(billingAmount),
+      source: "PROJECT",
+      product: project.name,
+      externalReference: invoiceNumber,
     },
     create: {
       projectId,
       clientId: project.clientId,
       number: invoiceNumber,
       client: project.client.name,
-      amount: project.agreedAmount,
-      netAmount: calculateNetWithoutVat(project.agreedAmount),
+      amount: billingAmount,
+      netAmount: calculateNetWithoutVat(billingAmount),
+      source: "PROJECT",
+      product: project.name,
+      externalReference: invoiceNumber,
       status: "Pendiente",
       dueDate,
     },

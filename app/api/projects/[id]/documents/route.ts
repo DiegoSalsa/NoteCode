@@ -26,6 +26,7 @@ export async function POST(
     const file = formData.get("file");
     const category = String(formData.get("category") || "General").trim() || "General";
     const customName = String(formData.get("name") || "").trim();
+    const clientVisible = String(formData.get("clientVisible") || "") === "true";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -53,6 +54,7 @@ export async function POST(
         fileData: storedFile ? null : bytes,
         storagePath: storedFile?.path ?? null,
         storageBucket: storedFile?.bucket ?? null,
+        clientVisible,
       },
       select: {
         id: true,
@@ -60,6 +62,7 @@ export async function POST(
         category: true,
         mimeType: true,
         size: true,
+        clientVisible: true,
         createdAt: true,
         updatedAt: true,
       },

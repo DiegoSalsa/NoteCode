@@ -12,6 +12,7 @@ type Note = {
     folder: string;
     updatedAt: string;
     createdAt: string;
+    project?: { id: string; name: string } | null;
 };
 
 const FOLDERS = ["General", "Procesos", "Tech", "Reuniones", "Ideas"];
@@ -245,6 +246,7 @@ export default function NotasPage() {
                             </p>
                             <div className="flex items-center gap-2 mt-2">
                                 <span className="text-[11px] text-neutral-600 bg-neutral-800 rounded px-1.5 py-0.5">{n.folder}</span>
+                                {n.project && <span className="truncate text-[11px] text-sky-400">Proyecto: {n.project.name}</span>}
                                 <span className="text-[11px] text-neutral-600">
                                     {new Date(n.updatedAt).toLocaleDateString("es-MX")}
                                 </span>
@@ -280,6 +282,7 @@ export default function NotasPage() {
                                 <h1 className="text-[20px] font-bold text-neutral-100 sm:text-[22px]">{selectedNote.title}</h1>
                                 <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3">
                                     <span className="text-[12px] text-neutral-500">{selectedNote.folder}</span>
+                                    {selectedNote.project && <span className="text-[12px] text-sky-400">Proyecto: {selectedNote.project.name}</span>}
                                     <span className="text-[12px] text-neutral-600">
                                         Actualizado: {new Date(selectedNote.updatedAt).toLocaleString("es-MX")}
                                     </span>

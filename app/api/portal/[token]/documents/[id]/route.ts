@@ -16,7 +16,16 @@ export async function GET(
   }
 
   const document = await prisma.document.findFirst({
-    where: { id, deletedAt: null, project: { clientId: access.clientId, deletedAt: null } },
+    where: {
+      id,
+      deletedAt: null,
+      clientVisible: true,
+      project: {
+        clientId: access.clientId,
+        deletedAt: null,
+        ...(access.projectId ? { id: access.projectId } : {}),
+      },
+    },
     select: { name: true, mimeType: true, fileData: true, storagePath: true, storageBucket: true },
   });
   if (!document) return NextResponse.json({ error: "Documento no encontrado." }, { status: 404 });

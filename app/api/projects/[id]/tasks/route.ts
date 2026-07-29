@@ -9,6 +9,7 @@ const taskSchema = z.object({
   status: z.enum(["Por hacer", "En progreso", "Bloqueado", "Hecho"]).default("Por hacer"),
   priority: z.enum(["Baja", "Media", "Alta"]).default("Media"),
   dueDate: z.string().trim().optional().nullable(),
+  clientVisible: z.boolean().default(false),
 });
 
 function parseDueDate(value: string | null | undefined) {
@@ -53,6 +54,7 @@ export async function POST(
         status: body.data.status,
         priority: body.data.priority,
         dueDate: parseDueDate(body.data.dueDate),
+        clientVisible: body.data.clientVisible,
       },
     });
 

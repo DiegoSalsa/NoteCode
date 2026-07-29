@@ -50,6 +50,9 @@ export async function GET(request: NextRequest) {
                         status: true,
                         dueDate: true,
                         paidAt: true,
+                        source: true,
+                        product: true,
+                        externalReference: true,
                         createdAt: true,
                         updatedAt: true,
                     },
@@ -169,6 +172,9 @@ export async function POST(request: NextRequest) {
                 status: body.status,
                 dueDate: new Date(body.dueDate),
                 notes: body.notes || null,
+                source: body.source,
+                product: body.product || null,
+                externalReference: body.externalReference || null,
             },
         });
         await recordAudit({

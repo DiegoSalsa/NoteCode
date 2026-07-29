@@ -5,9 +5,10 @@ import { z } from "zod";
 
 const requirementPatchSchema = z.object({
     description: z.string().trim().min(1).max(500).optional(),
-    category: z.enum(["Funcional", "No funcional"]).optional(),
+    category: z.enum(["Funcional", "No funcional", "Técnico", "UX/UI", "Seguridad"]).optional(),
     priority: z.enum(["Baja", "Media", "Alta"]).optional(),
     completed: z.boolean().optional(),
+    clientVisible: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -36,6 +37,7 @@ export async function PATCH(
                 category: body.data.category,
                 priority: body.data.priority,
                 completed: body.data.completed,
+                clientVisible: body.data.clientVisible,
             },
         });
         invalidateCache(`project:${id}`);

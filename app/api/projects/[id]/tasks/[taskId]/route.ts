@@ -9,6 +9,7 @@ const taskPatchSchema = z.object({
   status: z.enum(["Por hacer", "En progreso", "Bloqueado", "Hecho"]).optional(),
   priority: z.enum(["Baja", "Media", "Alta"]).optional(),
   dueDate: z.string().trim().optional().nullable(),
+  clientVisible: z.boolean().optional(),
 });
 
 function parseDueDate(value: string | null | undefined) {
@@ -43,6 +44,7 @@ export async function PATCH(
         status: body.data.status,
         priority: body.data.priority,
         dueDate: parseDueDate(body.data.dueDate),
+        clientVisible: body.data.clientVisible,
       },
     });
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson, writeCachedJson } from "@/lib/client-cache";
 import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
+import ProjectCommercial, { type ProjectInvoice, type ProjectQuote } from "@/components/ProjectCommercial";
 import {
     ArrowLeft,
     CalendarDays,
@@ -51,6 +52,7 @@ type Requirement = {
     category: string;
     priority: string;
     completed: boolean;
+    clientVisible: boolean;
     createdAt: string;
 };
 
@@ -63,6 +65,7 @@ type ProjectTask = {
     dueDate: string | null;
     createdAt: string;
     updatedAt: string;
+    clientVisible: boolean;
 };
 
 type Tech = { id: string; name: string; category: string };
@@ -91,6 +94,7 @@ type ProjectDocument = {
     size: number;
     createdAt: string;
     updatedAt: string;
+    clientVisible: boolean;
 };
 
 type TimelineItem = {
@@ -109,6 +113,7 @@ type ProjectOperations = {
     approvals: Array<{ id: string; title: string; type: string; status: string; requestedAt: string }>;
     contracts: Array<{ id: string; name: string; status: string; monthlyAmount: number }>;
     quote: { id: string; number: string; title: string; status: string } | null;
+    quotes: ProjectQuote[];
     totals: { hours: number; approvedHours: number; laborCost: number; expenses: number; invoiced: number; collected: number };
 };
 
@@ -121,6 +126,7 @@ type ProjectDetailPayload = {
     credentials: Credential[];
     notes: ProjectNote[];
     documents: ProjectDocument[];
+    invoices: ProjectInvoice[];
     operations: ProjectOperations;
     timeline: TimelineItem[];
 };
@@ -183,9 +189,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [creds, setCreds] = useState<Credential[]>(() => asArray<Credential>(cached?.credentials));
     const [notes, setNotes] = useState<ProjectNote[]>(() => asArray<ProjectNote>(cached?.notes));
     const [documents, setDocuments] = useState<ProjectDocument[]>(() => asArray<ProjectDocument>(cached?.documents));
+    const [invoices, setInvoices] = useState<ProjectInvoice[]>(() => asArray<ProjectInvoice>(cached?.invoices));
     const [timeline, setTimeline] = useState<TimelineItem[]>(() => asArray<TimelineItem>(cached?.timeline));
     const [operations, setOperations] = useState<ProjectOperations | null>(() => cached?.operations ?? null);
     const [loading, setLoading] = useState(!cached);
+    const [actionError, setActionError] = useState("");
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
     const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 
@@ -223,7 +231,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     // Document form
     const [docOpen, setDocOpen] = useState(false);
     const [docSaving, setDocSaving] = useState(false);
-    const [docForm, setDocForm] = useState({ name: "", category: "General", file: null as File | null });
+    const [docForm, setDocForm] = useState({ name: "", category: "General", clientVisible: false, file: null as File | null });
     const [docError, setDocError] = useState("");
 
     const fetchAll = useCallback(async () => {
@@ -237,6 +245,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             setCreds(asArray<Credential>(data.credentials));
             setNotes(asArray<ProjectNote>(data.notes));
             setDocuments(asArray<ProjectDocument>(data.documents));
+            setInvoices(asArray<ProjectInvoice>(data.invoices));
             setTimeline(asArray<TimelineItem>(data.timeline));
             setOperations(data.operations ?? null);
         } catch {
@@ -248,8 +257,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         fetchAll().finally(() => setLoading(false));
     }, [fetchAll]);
 
+    async function checkedFetch(input: RequestInfo | URL, init?: RequestInit) {
+        setActionError("");
+        const response = await fetch(input, init);
+        if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            const message = payload?.error || "No se pudo completar la operación.";
+            setActionError(message);
+            throw new Error(message);
+        }
+        return response;
+    }
+
     async function updateStatus() {
-        await fetch(`/api/projects/${id}/status`, {
+        await checkedFetch(`/api/projects/${id}/status`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: newStatus, note: statusNote || null }),
@@ -261,7 +282,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function addRequirement() {
         if (!reqDesc.trim()) return;
-        await fetch(`/api/projects/${id}/requirements`, {
+        await checkedFetch(`/api/projects/${id}/requirements`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ description: reqDesc, category: reqCat, priority: reqPriority }),
@@ -293,7 +314,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         }
 
         try {
-            const response = await fetch(`/api/projects/${id}/requirements/${reqId}`, {
+            const response = await checkedFetch(`/api/projects/${id}/requirements/${reqId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ completed }),
@@ -319,9 +340,27 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         }
     }
 
+    async function toggleClientVisibility(kind: "tasks" | "requirements", itemId: string, clientVisible: boolean) {
+        await checkedFetch(`/api/projects/${id}/${kind}/${itemId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientVisible }),
+        });
+        await fetchAll();
+    }
+
+    async function toggleDocumentVisibility(docId: string, clientVisible: boolean) {
+        await checkedFetch(`/api/documents/${docId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientVisible }),
+        });
+        await fetchAll();
+    }
+
     async function addTask() {
         if (!taskTitle.trim()) return;
-        await fetch(`/api/projects/${id}/tasks`, {
+        await checkedFetch(`/api/projects/${id}/tasks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -340,7 +379,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         setTasks(tasks.map((task) => task.id === taskId ? { ...task, status } : task));
 
         try {
-            const response = await fetch(`/api/projects/${id}/tasks/${taskId}`, {
+            const response = await checkedFetch(`/api/projects/${id}/tasks/${taskId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ status }),
@@ -353,18 +392,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function deleteTask(taskId: string) {
         if (!confirm("Eliminar esta tarea?")) return;
-        await fetch(`/api/projects/${id}/tasks/${taskId}`, { method: "DELETE" });
+        await checkedFetch(`/api/projects/${id}/tasks/${taskId}`, { method: "DELETE" });
         await fetchAll();
     }
 
     async function deleteRequirement(reqId: string) {
-        await fetch(`/api/projects/${id}/requirements/${reqId}`, { method: "DELETE" });
+        await checkedFetch(`/api/projects/${id}/requirements/${reqId}`, { method: "DELETE" });
         await fetchAll();
     }
 
     async function addTech() {
         if (!techName.trim()) return;
-        await fetch(`/api/projects/${id}/techs`, {
+        await checkedFetch(`/api/projects/${id}/techs`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: techName, category: techCat }),
@@ -374,12 +413,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
 
     async function deleteTech(techId: string) {
-        await fetch(`/api/projects/${id}/techs/${techId}`, { method: "DELETE" });
+        await checkedFetch(`/api/projects/${id}/techs/${techId}`, { method: "DELETE" });
         await fetchAll();
     }
 
     async function addCredential() {
-        await fetch(`/api/projects/${id}/credentials`, {
+        await checkedFetch(`/api/projects/${id}/credentials`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(credForm),
@@ -391,13 +430,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function deleteCredential(credId: string) {
         if (!confirm("¿Eliminar esta credencial?")) return;
-        await fetch(`/api/projects/${id}/credentials/${credId}`, { method: "DELETE" });
+        await checkedFetch(`/api/projects/${id}/credentials/${credId}`, { method: "DELETE" });
         await fetchAll();
     }
 
     async function addNote() {
         if (!noteTitle.trim()) return;
-        await fetch(`/api/projects/${id}/notes`, {
+        await checkedFetch(`/api/projects/${id}/notes`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ title: noteTitle, content: noteContent }),
@@ -410,7 +449,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function deleteNote(noteId: string) {
         if (!confirm("¿Eliminar esta nota?")) return;
-        await fetch(`/api/projects/${id}/notes/${noteId}`, { method: "DELETE" });
+        await checkedFetch(`/api/projects/${id}/notes/${noteId}`, { method: "DELETE" });
         await fetchAll();
     }
 
@@ -427,13 +466,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             body.set("file", docForm.file);
             body.set("name", docForm.name);
             body.set("category", docForm.category);
-            const response = await fetch(`/api/projects/${id}/documents`, { method: "POST", body });
+            body.set("clientVisible", String(docForm.clientVisible));
+            const response = await checkedFetch(`/api/projects/${id}/documents`, { method: "POST", body });
             if (!response.ok) {
                 const data = await response.json().catch(() => null);
                 throw new Error(data?.error || "No se pudo subir el documento.");
             }
             setDocOpen(false);
-            setDocForm({ name: "", category: "General", file: null });
+            setDocForm({ name: "", category: "General", clientVisible: false, file: null });
             await fetchAll();
         } catch (err) {
             setDocError(err instanceof Error ? err.message : "No se pudo subir el documento.");
@@ -444,7 +484,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     async function deleteDocument(docId: string) {
         if (!confirm("¿Eliminar este documento?")) return;
-        await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+        await checkedFetch(`/api/documents/${docId}`, { method: "DELETE" });
         await fetchAll();
     }
 
@@ -487,6 +527,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     const tabs = [
         { key: "overview", label: "General", count: null },
+        { key: "commercial", label: "Comercial", count: operations?.quotes?.length ?? 0 },
         { key: "operations", label: "Operación", count: operations ? operations.assignments.length + operations.tickets.length : 0 },
         { key: "tasks", label: "Tareas", count: tasks.length },
         { key: "timeline", label: "Timeline", count: timeline.length },
@@ -528,6 +569,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                 </div>
             </div>
+
+            {actionError && (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+                    <span>{actionError}</span>
+                    <button onClick={() => setActionError("")}><X size={14} /></button>
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="relative -mx-4 sm:mx-0">
@@ -581,6 +629,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         )}
                     </div>
                 </div>
+            )}
+
+            {tab === "commercial" && operations && (
+                <ProjectCommercial
+                    projectId={id}
+                    clientId={project.client.id}
+                    projectName={project.name}
+                    quotes={operations.quotes ?? []}
+                    invoices={invoices}
+                    onChanged={fetchAll}
+                />
             )}
 
             {tab === "operations" && operations && (
@@ -663,6 +722,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                                 {task.description && <p className="mt-2 text-[12px] text-neutral-500">{task.description}</p>}
                                                 <div className="mt-3 flex flex-wrap items-center gap-2">
                                                     <PriorityBadge priority={task.priority} />
+                                                    <button onClick={() => toggleClientVisibility("tasks", task.id, !task.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${task.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
+                                                        {task.clientVisible ? "Visible al cliente" : "Solo interno"}
+                                                    </button>
                                                     {task.dueDate && (
                                                         <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
                                                             <CalendarDays size={11} />
@@ -737,6 +799,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 </span>
                                 <span className="text-[11px] text-neutral-600">{req.category}</span>
                                 <PriorityBadge priority={req.priority} />
+                                <button onClick={() => toggleClientVisibility("requirements", req.id, !req.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${req.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
+                                    {req.clientVisible ? "Visible al cliente" : "Solo interno"}
+                                </button>
                                 <button onClick={() => deleteRequirement(req.id)} className="rounded p-1 text-neutral-700 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
                                     <Trash2 size={12} strokeWidth={1.5} />
                                 </button>
@@ -900,7 +965,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 <div className="space-y-4">
                     <button
                         onClick={() => {
-                            setDocForm({ name: "", category: "General", file: null });
+                            setDocForm({ name: "", category: "General", clientVisible: false, file: null });
                             setDocError("");
                             setDocOpen(true);
                         }}
@@ -930,6 +995,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleDocumentVisibility(doc.id, !doc.clientVisible)}
+                                        className={`rounded-md border px-2.5 py-2 text-[11px] ${doc.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}
+                                    >
+                                        {doc.clientVisible ? "Publicado" : "Interno"}
+                                    </button>
                                     <a
                                         href={`/api/documents/${doc.id}`}
                                         className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-neutral-400 transition-colors hover:bg-white/5 hover:text-neutral-100"
@@ -1004,6 +1076,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                             <option key={category} value={category} />
                                         ))}
                                     </datalist>
+                                    <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[13px] text-neutral-300">
+                                        <input type="checkbox" checked={docForm.clientVisible} onChange={(event) => setDocForm({ ...docForm, clientVisible: event.target.checked })} />
+                                        Publicar este documento en el portal del cliente
+                                    </label>
                                     <div className="flex flex-col gap-3 pt-2 sm:flex-row">
                                         <button type="button" onClick={() => setDocOpen(false)} className="flex-1 rounded-lg border border-white/10 px-4 py-2 text-[13px] font-medium text-neutral-300 hover:bg-white/5">
                                             Cancelar

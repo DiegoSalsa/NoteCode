@@ -56,6 +56,26 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para publicar documentos." }, { status: 403 });
+  const { id } = await params;
+  const body = await request.json() as { clientVisible?: boolean };
+  const document = await prisma.document.update({
+    where: { id },
+    data: { clientVisible: body.clientVisible },
+    select: { id: true, projectId: true, clientVisible: true },
+  });
+  invalidateCache("documents");
+  invalidateCache("erp:");
+  if (document.projectId) invalidateCache(`project:${document.projectId}`);
+  return NextResponse.json(document);
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },

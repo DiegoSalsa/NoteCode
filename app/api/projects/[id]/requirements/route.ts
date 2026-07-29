@@ -5,8 +5,9 @@ import { z } from "zod";
 
 const requirementSchema = z.object({
     description: z.string().trim().min(1).max(500),
-    category: z.enum(["Funcional", "No funcional"]).default("Funcional"),
+    category: z.enum(["Funcional", "No funcional", "Técnico", "UX/UI", "Seguridad"]).default("Funcional"),
     priority: z.enum(["Baja", "Media", "Alta"]).default("Media"),
+    clientVisible: z.boolean().default(false),
 });
 
 export async function GET(
@@ -42,6 +43,7 @@ export async function POST(
                 description: body.data.description,
                 category: body.data.category,
                 priority: body.data.priority,
+                clientVisible: body.data.clientVisible,
             },
         });
         invalidateCache(`project:${id}`);

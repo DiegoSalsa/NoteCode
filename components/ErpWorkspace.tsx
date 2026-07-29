@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 
 type Item = Record<string, unknown> & { id: string };
-type Option = { id: string; name?: string; number?: string; client?: string; amount?: number; status?: string };
+type Option = { id: string; name?: string; title?: string; number?: string; client?: string; amount?: number; status?: string; projectId?: string; clientId?: string };
 type Options = {
   clients: Option[];
   projects: Option[];
+  tasks: Option[];
   team: Option[];
   suppliers: Option[];
   invoices: Option[];
@@ -40,7 +41,7 @@ type Module = {
   fields: Field[];
 };
 
-const EMPTY_OPTIONS: Options = { clients: [], projects: [], team: [], suppliers: [], invoices: [], opportunities: [], accounts: [], payrollPeriods: [] };
+const EMPTY_OPTIONS: Options = { clients: [], projects: [], tasks: [], team: [], suppliers: [], invoices: [], opportunities: [], accounts: [], payrollPeriods: [] };
 const money = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 const numberFormat = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 });
 
@@ -106,6 +107,7 @@ const modules: Module[] = [
     id: "horas", label: "Horas", resource: "time-entries", description: "Tiempo, facturabilidad y costo real por proyecto.", icon: Clock3,
     fields: [
       { key: "projectId", label: "Proyecto", type: "select", source: "projects", required: true },
+      { key: "taskId", label: "Tarea del proyecto", type: "select", source: "tasks" },
       { key: "teamMemberId", label: "Persona", type: "select", source: "team", required: true },
       { key: "date", label: "Fecha", type: "date", required: true }, { key: "hours", label: "Horas", type: "number", required: true },
       { key: "description", label: "Descripción", type: "textarea", required: true }, { key: "billable", label: "Facturable", type: "checkbox", defaultValue: true },
@@ -262,7 +264,7 @@ function value(item: Item, path: string): unknown {
 }
 
 function labelForOption(option: Option) {
-  return option.name ?? (option.number ? `${option.number}${option.client ? ` · ${option.client}` : ""}` : option.id);
+  return option.name ?? option.title ?? (option.number ? `${option.number}${option.client ? ` · ${option.client}` : ""}` : option.id);
 }
 
 function statusClass(status: string) {
@@ -482,11 +484,11 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
     await load(true);
   }
 
-  async function createPortal(clientId: string) {
+  async function createPortal(clientId: string, projectId?: string) {
     setSaving(true);
     try {
       const response = await fetch("/api/erp/portal-tokens", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, projectId: projectId || null }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
@@ -726,6 +728,13 @@ function FormField({ field, form, options, onChange }: { field: Field; form: Rec
   const current = form[field.key] ?? (field.type === "checkbox" ? false : "");
   const wide = field.type === "textarea" || ["notes", "description", "terms"].includes(field.key);
   const base = "w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-white/25";
+  const sourceOptions = field.source
+    ? options[field.source].filter((option) => {
+      if (field.source === "tasks" && form.projectId) return option.projectId === String(form.projectId);
+      if (field.source === "projects" && form.clientId) return !option.clientId || option.clientId === String(form.clientId);
+      return true;
+    })
+    : [];
   return (
     <label className={wide ? "sm:col-span-2" : ""}>
       <span className="mb-1.5 block text-xs font-medium text-neutral-400">{field.label}{field.required ? " *" : ""}</span>
@@ -733,7 +742,7 @@ function FormField({ field, form, options, onChange }: { field: Field; form: Rec
         : field.type === "select" ? (
           <select required={field.required} value={String(current)} onChange={(event) => onChange(event.target.value)} className={base}>
             <option value="">Seleccionar...</option>
-            {field.source ? options[field.source].map((option) => <option key={option.id} value={option.id}>{labelForOption(option)}</option>) : field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+            {field.source ? sourceOptions.map((option) => <option key={option.id} value={option.id}>{labelForOption(option)}</option>) : field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         ) : field.type === "checkbox" ? (
           <button type="button" onClick={() => onChange(!Boolean(current))} className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${current ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-white/10 bg-neutral-950 text-neutral-500"}`}><span>{current ? "Sí" : "No"}</span><CheckCircle2 size={15} /></button>
@@ -957,7 +966,8 @@ function ModuleActions({ resource, item, onUpdate, onRemove, onTicketComment }: 
   );
 }
 
-function PortalList({ items, generated, onGenerate, onManage }: { items: Item[]; generated: string; onGenerate: (clientId: string) => void; onManage: (id: string, action: "rotate" | "revoke" | "restore") => void }) {
+function PortalList({ items, generated, onGenerate, onManage }: { items: Item[]; generated: string; onGenerate: (clientId: string, projectId?: string) => void; onManage: (id: string, action: "rotate" | "revoke" | "restore") => void }) {
+  const [scopeByClient, setScopeByClient] = useState<Record<string, string>>({});
   async function copyPath(path: string) {
     await navigator.clipboard?.writeText(`${window.location.origin}${path}`);
   }
@@ -967,6 +977,8 @@ function PortalList({ items, generated, onGenerate, onManage }: { items: Item[];
       <div className="space-y-3">
         {items.map((client) => {
           const portals = Array.isArray(client.portals) ? client.portals as Array<Item> : [];
+          const projects = Array.isArray(client.projects) ? client.projects as Array<Item> : [];
+          const selectedScope = scopeByClient[client.id] ?? "";
           return (
             <article key={client.id} className="rounded-xl border border-white/10 bg-neutral-900 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -975,7 +987,13 @@ function PortalList({ items, generated, onGenerate, onManage }: { items: Item[];
                   subtitle={String(client.name)}
                   meta={`${value(client, "_count.projects") ?? 0} proyectos · ${value(client, "_count.quotes") ?? 0} cotizaciones · ${value(client, "_count.tickets") ?? 0} tickets`}
                 />
-                {portals.length === 0 && <button onClick={() => onGenerate(client.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-neutral-950">Crear portal</button>}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <select value={selectedScope} onChange={(event) => setScopeByClient((current) => ({ ...current, [client.id]: event.target.value }))} className="rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-xs text-neutral-300">
+                    <option value="">Todos los proyectos del cliente</option>
+                    {projects.map((project) => <option key={project.id} value={project.id}>Solo {String(project.name)}</option>)}
+                  </select>
+                  <button onClick={() => onGenerate(client.id, selectedScope || undefined)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-neutral-950">Crear acceso</button>
+                </div>
               </div>
               {portals.length > 0 && <div className="mt-4 space-y-2 border-t border-white/5 pt-4">
                 {portals.map((portal) => {
@@ -988,14 +1006,16 @@ function PortalList({ items, generated, onGenerate, onManage }: { items: Item[];
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-neutral-200">{String(portal.label)}</p><Status>{active ? "Activo" : revoked ? "Revocado" : "Vencido"}</Status></div>
+                          <p className="mt-1 text-[11px] text-sky-400">{value(portal, "project.name") ? `Alcance: ${String(value(portal, "project.name"))}` : "Alcance: todos los proyectos del cliente"}</p>
                           <p className="mt-1 text-[11px] text-neutral-600">
                             {portal.lastUsedAt ? `Último acceso ${new Date(String(portal.lastUsedAt)).toLocaleString("es-CL")}` : "Aún no utilizado"}
                             {portal.expiresAt ? ` · vence ${new Date(String(portal.expiresAt)).toLocaleDateString("es-CL")}` : " · sin vencimiento"}
+                            {` · ${Number(portal.visits ?? 0)} visitas recientes del cliente`}
                           </p>
                           {!path && <p className="mt-1 text-[11px] text-amber-300">Enlace antiguo: regenéralo una vez para poder consultarlo siempre.</p>}
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {path && active && <a href={path} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300">Ver como cliente <ArrowUpRight size={12} /></a>}
+                          {path && active && <a href={`${path}?preview=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300">Vista previa <ArrowUpRight size={12} /></a>}
                           {path && active && <button onClick={() => void copyPath(path)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Copiar</button>}
                           <button onClick={() => onManage(portal.id, "rotate")} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">{path ? "Regenerar" : "Recuperar enlace"}</button>
                           {active ? <button onClick={() => onManage(portal.id, "revoke")} className="rounded-md border border-red-500/20 px-2.5 py-1.5 text-xs text-red-300">Revocar</button> : <button onClick={() => onManage(portal.id, "restore")} className="rounded-md border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-300">Reactivar</button>}
@@ -1004,7 +1024,6 @@ function PortalList({ items, generated, onGenerate, onManage }: { items: Item[];
                     </div>
                   );
                 })}
-                <button onClick={() => onGenerate(client.id)} className="text-xs text-neutral-500 hover:text-white">+ Crear otro acceso</button>
               </div>}
             </article>
           );

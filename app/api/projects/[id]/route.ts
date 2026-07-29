@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { cached, invalidateCache } from "@/lib/server-cache";
+import { canManage, getCurrentUser } from "@/lib/auth";
 
 const MASKED_SECRET = "************";
 
@@ -16,6 +17,7 @@ export async function GET(
                 where: { id, deletedAt: null },
                 include: {
                     client: { select: { id: true, name: true } },
+                    owner: { select: { id: true, name: true } },
                     statusLogs: { orderBy: { createdAt: "desc" } },
                     requirements: { orderBy: { createdAt: "desc" } },
                     tasks: { orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }] },
@@ -30,14 +32,14 @@ export async function GET(
                             updatedAt: true,
                         },
                     },
-                    notes: { orderBy: { updatedAt: "desc" } },
+                    notes: { where: { deletedAt: null }, orderBy: { updatedAt: "desc" } },
                     documents: {
                         orderBy: { updatedAt: "desc" },
-                        select: { id: true, name: true, category: true, size: true, updatedAt: true, createdAt: true },
+                        select: { id: true, name: true, category: true, size: true, clientVisible: true, updatedAt: true, createdAt: true },
                     },
                     invoices: {
                       orderBy: { createdAt: "desc" },
-                      select: { id: true, number: true, amount: true, status: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
+                      select: { id: true, number: true, amount: true, status: true, source: true, product: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
                     },
                     assignments: {
                       orderBy: { updatedAt: "desc" },
@@ -68,15 +70,17 @@ export async function GET(
                       orderBy: { updatedAt: "desc" },
                       select: { id: true, name: true, status: true, monthlyAmount: true },
                     },
-                    quote: {
-                      select: { id: true, number: true, title: true, status: true },
+                    quotes: {
+                      where: { deletedAt: null },
+                      orderBy: [{ createdAt: "desc" }],
+                      include: { items: { orderBy: { sortOrder: "asc" } } },
                     },
                 },
             });
 
             if (!project) return null;
 
-            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices, assignments, timeEntries, expenses, tickets, approvals, contracts, quote } = project;
+            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices, assignments, timeEntries, expenses, tickets, approvals, contracts, quotes } = project;
             const timeline = [
                 ...statusLogs.map((log) => ({
                     id: `status:${log.id}`,
@@ -154,7 +158,8 @@ export async function GET(
                     tickets,
                     approvals,
                     contracts,
-                    quote,
+                    quote: quotes[0] ?? null,
+                    quotes,
                     totals: {
                         hours: timeEntries.reduce((sum, entry) => sum + entry.hours, 0),
                         approvedHours: timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0),
@@ -182,9 +187,14 @@ export async function PATCH(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para modificar proyectos." }, { status: 403 });
     try {
         const { id } = await params;
         const body = await request.json();
+        const existing = await prisma.project.findUnique({ where: { id }, select: { status: true } });
+        if (!existing) return NextResponse.json({ error: "Project not found" }, { status: 404 });
         const clientId = body.clientId || body.clientName
             ? await resolveClientId({ clientId: body.clientId, clientName: body.clientName })
             : undefined;
@@ -195,7 +205,16 @@ export async function PATCH(
                 description: body.description,
                 status: body.status,
                 agreedAmount: body.agreedAmount === undefined ? undefined : Number(body.agreedAmount) || 0,
+                currency: body.currency,
+                budgetHours: body.budgetHours === undefined ? undefined : Number(body.budgetHours) || 0,
+                budgetCost: body.budgetCost === undefined ? undefined : Number(body.budgetCost) || 0,
+                startDate: body.startDate === undefined ? undefined : body.startDate ? new Date(body.startDate) : null,
+                targetDate: body.targetDate === undefined ? undefined : body.targetDate ? new Date(body.targetDate) : null,
+                ownerId: body.ownerId === undefined ? undefined : body.ownerId || null,
                 clientId,
+                statusLogs: body.status && body.status !== existing.status
+                    ? { create: { status: body.status, note: body.statusNote || "Actualizado desde la ficha del proyecto" } }
+                    : undefined,
             },
             include: { client: { select: { id: true, name: true } } },
         });
@@ -214,6 +233,9 @@ export async function DELETE(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para eliminar proyectos." }, { status: 403 });
     try {
         const { id } = await params;
         await prisma.project.update({

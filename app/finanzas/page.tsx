@@ -18,6 +18,8 @@ type Invoice = {
     paidAt: string | null;
     createdAt: string;
     updatedAt: string;
+    source: string;
+    product: string | null;
 };
 
 const STATUSES = ["Pendiente", "Parcial", "Pagado", "Vencido", "Cancelado"];
@@ -341,6 +343,9 @@ export default function FinanzasPage() {
                                 <div>
                                     <h3 className="text-[14px] font-medium text-neutral-200">{inv.number}</h3>
                                     <p className="text-[12px] text-neutral-500 mt-0.5">{inv.client}</p>
+                                    <p className={`mt-1 text-[10px] font-medium uppercase tracking-wide ${inv.source === "PURAGENDA" ? "text-violet-400" : inv.source === "PROJECT" ? "text-sky-400" : "text-neutral-600"}`}>
+                                        {inv.source === "PURAGENDA" ? `SaaS · ${inv.product || "PuraAgenda"}` : inv.source === "PROJECT" ? "Proyecto NoteCode" : "Venta manual"}
+                                    </p>
                                 </div>
                                 <span className="text-[12px] text-neutral-600">
                                     Vence: {new Date(inv.dueDate).toLocaleDateString("es-MX")}

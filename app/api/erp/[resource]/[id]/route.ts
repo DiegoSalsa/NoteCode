@@ -5,6 +5,8 @@ import { canManage, canManageFinance, getCurrentUser } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { encryptString } from "@/lib/crypto";
 import { invalidateCache } from "@/lib/server-cache";
+import { assertProjectBelongsToClient, syncApprovedQuoteToProject } from "@/lib/commercial";
+import { syncProjectInvoice } from "@/lib/projects";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -87,6 +89,9 @@ export async function PATCH(
           data: {
             label: body.label === undefined ? undefined : text(body.label) || "Portal principal",
             expiresAt: body.expiresAt === undefined ? undefined : date(body.expiresAt),
+            projectId: body.projectId === undefined
+              ? undefined
+              : (await assertProjectBelongsToClient(text(body.projectId) || null, portal.clientId))?.id ?? null,
             revokedAt: action === "revoke" ? new Date() : action === "restore" ? null : undefined,
           },
         });
@@ -158,6 +163,46 @@ export async function PATCH(
       case "quotes": {
         const quote = await prisma.quote.findUnique({ where: { id }, include: { items: true, client: true } });
         if (!quote) return NextResponse.json({ error: "Cotización no encontrada." }, { status: 404 });
+        if (action === "revision") {
+          const revisionRootId = quote.parentQuoteId ?? quote.id;
+          const latestRevision = await prisma.quote.findFirst({
+            where: { OR: [{ id: revisionRootId }, { parentQuoteId: revisionRootId }] },
+            orderBy: { version: "desc" },
+            select: { version: true },
+          });
+          const revisionNumber = `COT-${new Date().getFullYear()}-${String(await prisma.quote.count() + 1).padStart(4, "0")}`;
+          const revision = await prisma.quote.create({
+            data: {
+              number: revisionNumber,
+              clientId: quote.clientId,
+              opportunityId: quote.opportunityId,
+              projectId: quote.projectId,
+              version: (latestRevision?.version ?? quote.version) + 1,
+              parentQuoteId: revisionRootId,
+              title: quote.title,
+              status: "Borrador",
+              currency: quote.currency,
+              taxRate: quote.taxRate,
+              discount: quote.discount,
+              validUntil: quote.validUntil,
+              terms: quote.terms,
+              notes: quote.notes,
+              items: {
+                create: quote.items.map((line) => ({
+                  description: line.description,
+                  quantity: line.quantity,
+                  unitPrice: line.unitPrice,
+                  sortOrder: line.sortOrder,
+                })),
+              },
+            },
+            include: { items: true },
+          });
+          await recordAudit({ action: "REVISE", entityType: "Quote", entityId: revision.id, summary: `Revisión de ${quote.number}` });
+          invalidateCache("erp:");
+          invalidateCache("project:");
+          return NextResponse.json(revision, { status: 201 });
+        }
         if (action === "convert") {
           const total = quote.items.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0) * (1 - quote.discount / 100) * (1 + quote.taxRate / 100);
           const project = await prisma.project.create({ data: {
@@ -177,16 +222,59 @@ export async function PATCH(
           invalidateCache("project:");
           return NextResponse.json({ quote: item, project });
         }
+        const nextClientId = body.clientId === undefined ? quote.clientId : text(body.clientId);
+        const nextProjectId = body.projectId === undefined ? quote.projectId : text(body.projectId) || null;
+        await assertProjectBelongsToClient(nextProjectId, nextClientId);
         const status = body.status === undefined ? undefined : text(body.status);
-        item = await prisma.quote.update({ where: { id }, data: {
-          status,
-          sentAt: status === "Enviada" ? new Date() : undefined,
-          approvedAt: status === "Aprobada" ? new Date() : undefined,
-          rejectedAt: status === "Rechazada" ? new Date() : undefined,
-          validUntil: body.validUntil === undefined ? undefined : date(body.validUntil),
-          terms: body.terms === undefined ? undefined : text(body.terms) || null,
-          notes: body.notes === undefined ? undefined : text(body.notes) || null,
-        } });
+        const lines = Array.isArray(body.items) ? body.items as Array<Record<string, unknown>> : null;
+        if (lines && (!lines.length || lines.some((line) => !text(line.description)))) {
+          return NextResponse.json({ error: "La cotización necesita ítems con descripción." }, { status: 400 });
+        }
+        item = await prisma.$transaction(async (tx) => {
+          const updated = await tx.quote.update({ where: { id }, data: {
+            clientId: body.clientId === undefined ? undefined : nextClientId,
+            projectId: body.projectId === undefined ? undefined : nextProjectId,
+            title: body.title === undefined ? undefined : text(body.title),
+            currency: body.currency === undefined ? undefined : text(body.currency) || "CLP",
+            taxRate: body.taxRate === undefined ? undefined : number(body.taxRate, 19),
+            discount: body.discount === undefined ? undefined : number(body.discount),
+            status,
+            sentAt: status === "Enviada" ? new Date() : undefined,
+            approvedAt: status === "Aprobada" ? new Date() : undefined,
+            rejectedAt: status === "Rechazada" ? new Date() : undefined,
+            validUntil: body.validUntil === undefined ? undefined : date(body.validUntil),
+            terms: body.terms === undefined ? undefined : text(body.terms) || null,
+            notes: body.notes === undefined ? undefined : text(body.notes) || null,
+          } });
+          if (lines) {
+            await tx.quoteItem.deleteMany({ where: { quoteId: id } });
+            await tx.quoteItem.createMany({
+              data: lines.map((line, index) => ({
+                quoteId: id,
+                description: text(line.description),
+                quantity: Math.max(0.01, number(line.quantity, 1)),
+                unitPrice: Math.max(0, number(line.unitPrice)),
+                sortOrder: index,
+              })),
+            });
+          }
+          return updated;
+        });
+        if (status === "Enviada") {
+          const revisionRootId = quote.parentQuoteId ?? quote.id;
+          await prisma.quote.updateMany({
+            where: {
+              id: { not: id },
+              OR: [{ id: revisionRootId }, { parentQuoteId: revisionRootId }],
+              status: { in: ["Borrador", "Enviada"] },
+            },
+            data: { status: "Reemplazada" },
+          });
+        }
+        if ((status ?? quote.status) === "Aprobada") {
+          await syncApprovedQuoteToProject(id);
+          if (nextProjectId) await syncProjectInvoice(nextProjectId);
+        }
         break;
       }
       case "team":

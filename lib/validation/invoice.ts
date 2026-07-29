@@ -17,6 +17,9 @@ export const createInvoiceSchema = z.object({
   dueDate: dateString,
   status: invoiceStatus.default("Pendiente"),
   notes: z.string().trim().max(3000).optional().nullable(),
+  source: z.enum(["MANUAL", "PROJECT", "PURAGENDA", "OTHER"]).default("MANUAL"),
+  product: z.string().trim().max(200).optional().nullable(),
+  externalReference: z.string().trim().max(200).optional().nullable(),
 });
 
 export const updateInvoiceSchema = createInvoiceSchema.partial().extend({

@@ -21,13 +21,26 @@ export async function PATCH(
         const body = parsed.data;
         const current = await prisma.invoice.findFirst({ where: { id, deletedAt: null } });
         if (!current) return NextResponse.json({ error: "Factura no encontrada." }, { status: 404 });
+        const effectiveClientId = body.clientId === undefined ? current.clientId : body.clientId || null;
+        const effectiveProjectId = body.projectId === undefined ? current.projectId : body.projectId || null;
+        const selectedClient = effectiveClientId
+            ? await prisma.client.findFirst({ where: { id: effectiveClientId, deletedAt: null }, select: { id: true, name: true } })
+            : null;
+        const selectedProject = effectiveProjectId
+            ? await prisma.project.findFirst({ where: { id: effectiveProjectId, deletedAt: null }, select: { id: true, clientId: true } })
+            : null;
+        if (effectiveClientId && !selectedClient) return NextResponse.json({ error: "El cliente seleccionado no existe." }, { status: 400 });
+        if (effectiveProjectId && !selectedProject) return NextResponse.json({ error: "El proyecto seleccionado no existe." }, { status: 400 });
+        if (selectedProject && selectedClient && selectedProject.clientId !== selectedClient.id) {
+            return NextResponse.json({ error: "El proyecto no pertenece al cliente seleccionado." }, { status: 400 });
+        }
         const amount = body.amount ?? current.amount;
         const taxRate = body.taxRate ?? current.taxRate;
         const invoice = await prisma.invoice.update({
             where: { id },
             data: {
                 number: body.number,
-                client: body.client,
+                client: body.client ?? selectedClient?.name,
                 amount: body.amount,
                 projectId: body.projectId === undefined ? undefined : body.projectId || null,
                 clientId: body.clientId === undefined ? undefined : body.clientId || null,
@@ -37,6 +50,9 @@ export async function PATCH(
                 dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
                 paidAt: body.paidAt === undefined ? undefined : body.paidAt ? new Date(body.paidAt) : null,
                 notes: body.notes === undefined ? undefined : body.notes || null,
+                source: body.source,
+                product: body.product === undefined ? undefined : body.product || null,
+                externalReference: body.externalReference === undefined ? undefined : body.externalReference || null,
             },
         });
         await recordAudit({
