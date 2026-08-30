@@ -38,23 +38,26 @@ model Client {
 }
 
 model Project {
-  id           String      @id @default(uuid())
-  name         String
-  description  String?
-  status       String      @default("En progreso")
-  agreedAmount Float       @default(0) @map("agreed_amount")
-  currency     String      @default("CLP")
-  budgetHours  Float       @default(0) @map("budget_hours")
-  budgetCost   Float       @default(0) @map("budget_cost")
-  startDate    DateTime?   @map("start_date")
-  targetDate   DateTime?   @map("target_date")
-  ownerId      String?     @map("owner_id")
-  owner        TeamMember? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  clientId     String      @map("client_id")
-  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
-  deletedAt    DateTime?   @map("deleted_at")
+  id              String       @id @default(uuid())
+  name            String
+  description     String?
+  visibility      String       @default("COMPANY")
+  personalOwnerId String?      @map("personal_owner_id")
+  personalOwner   UserProfile? @relation("PersonalProjectOwner", fields: [personalOwnerId], references: [userId], onDelete: Cascade)
+  status          String       @default("En progreso")
+  agreedAmount    Float        @default(0) @map("agreed_amount")
+  currency        String       @default("CLP")
+  budgetHours     Float        @default(0) @map("budget_hours")
+  budgetCost      Float        @default(0) @map("budget_cost")
+  startDate       DateTime?    @map("start_date")
+  targetDate      DateTime?    @map("target_date")
+  ownerId         String?      @map("owner_id")
+  owner           TeamMember?  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  clientId        String?      @map("client_id")
+  client          Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
 
   statusLogs       ProjectStatusLog[]
   requirements     ProjectRequirement[]
@@ -76,6 +79,7 @@ model Project {
 
   @@index([clientId])
   @@index([ownerId])
+  @@index([visibility, personalOwnerId])
   @@index([status])
   @@index([updatedAt])
   @@index([status, updatedAt])
@@ -229,6 +233,8 @@ model UserProfile {
   assistantMemories AssistantMemory[]
   assistantActions  AssistantAction[]
   assistantRoutines AssistantRoutine[]
+  personalNotes     Note[]             @relation("PersonalNoteOwner")
+  personalProjects  Project[]          @relation("PersonalProjectOwner")
 
   @@index([email])
   @@index([role, active])
@@ -356,18 +362,22 @@ model Invoice {
 }
 
 model Note {
-  id        String    @id @default(uuid())
-  projectId String?   @map("project_id")
-  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title     String
-  content   String    @default("")
-  folder    String    @default("General")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  id              String       @id @default(uuid())
+  projectId       String?      @map("project_id")
+  project         Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  visibility      String       @default("COMPANY")
+  personalOwnerId String?      @map("personal_owner_id")
+  personalOwner   UserProfile? @relation("PersonalNoteOwner", fields: [personalOwnerId], references: [userId], onDelete: Cascade)
+  title           String
+  content         String       @default("")
+  folder          String       @default("General")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
 
   @@index([folder])
   @@index([projectId])
+  @@index([visibility, personalOwnerId])
   @@index([updatedAt])
   @@index([createdAt])
   @@index([deletedAt])

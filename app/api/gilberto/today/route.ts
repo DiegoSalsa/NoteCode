@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
         take: 10,
       }),
       ensureDefaultRoutines(user.id),
-      prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
+      prisma.project.count({ where: { deletedAt: null, visibility: "COMPANY", status: { not: "Completado" } } }),
       canSeeFinance ? buildF29Snapshot(taxPeriod) : Promise.resolve(null),
     ]);
 

@@ -9,6 +9,7 @@ import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { invalidateCache } from "@/lib/server-cache";
 import { periodForPreviousMonth } from "@/lib/tax/f29";
 import { buildF29Snapshot } from "@/lib/tax/f29-service";
+import { COMPANY_VISIBILITY, PERSONAL_VISIBILITY } from "@/lib/personal-workspace";
 
 function formatClp(value: number) {
     return new Intl.NumberFormat("es-CL", {
@@ -86,15 +87,19 @@ export type GilbertoToolContext = {
     role?: string | null;
 };
 
-async function resolveProjectForTool(input: {
+async function resolveScopedProjectForTool(input: {
     projectId?: string;
     projectName?: string;
     contextProjectId?: string | null;
+    userId?: string | null;
 }) {
+    const visibilityWhere = input.userId
+        ? { OR: [{ visibility: COMPANY_VISIBILITY }, { visibility: PERSONAL_VISIBILITY, personalOwnerId: input.userId }] }
+        : { visibility: COMPANY_VISIBILITY };
     if (input.projectId || input.contextProjectId) {
-        const project = await prisma.project.findUnique({
-            where: { id: input.projectId || input.contextProjectId || "", deletedAt: null },
-            select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, client: { select: { id: true, name: true, company: true } } },
+        const project = await prisma.project.findFirst({
+            where: { id: input.projectId || input.contextProjectId || "", deletedAt: null, ...visibilityWhere },
+            select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, visibility: true, client: { select: { id: true, name: true, company: true } } },
         });
         if (project) return { project };
     }
@@ -110,10 +115,11 @@ async function resolveProjectForTool(input: {
         where: {
             deletedAt: null,
             name: { contains: projectName, mode: "insensitive" },
+            ...visibilityWhere,
         },
         orderBy: { updatedAt: "desc" },
         take: 5,
-        select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, client: { select: { id: true, name: true, company: true } } },
+        select: { id: true, name: true, status: true, agreedAmount: true, clientId: true, visibility: true, client: { select: { id: true, name: true, company: true } } },
     });
 
     if (matches.length === 1) return { project: matches[0] };
@@ -169,21 +175,32 @@ async function nextQuoteNumber() {
 
 export function createTools(context: GilbertoToolContext = {}) {
     const canUseFinance = ["ADMIN", "MANAGER", "FINANCE"].includes(context.role ?? "");
+    const resolveProjectForTool = (input: {
+        projectId?: string;
+        projectName?: string;
+        contextProjectId?: string | null;
+    }) => resolveScopedProjectForTool({ ...input, userId: context.userId });
     return {
     getProyectos: tool({
         description:
-            "Obtiene proyectos de PuroCode con cliente, estado, monto acordado y fechas relevantes. Puede incluir activos, finalizados o todos.",
+            "Obtiene proyectos de empresa o los proyectos personales del usuario. Los proyectos personales solo se consultan dentro de la sesion de su propietario.",
         inputSchema: z.object({
             estado: z.enum(["todos", "activos", "finalizados"]).default("todos").describe("Filtro de proyectos a consultar."),
+            ambito: z.enum(["empresa", "personal"]).default("empresa").describe("Usa personal solo si el usuario pide sus proyectos personales."),
         }),
-        execute: async ({ estado }) => {
+        execute: async ({ estado, ambito }) => {
+            if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para ver proyectos personales." };
             const statusWhere =
                 estado === "activos"
                     ? { status: { not: "Completado" } }
                     : estado === "finalizados"
                       ? { status: "Completado" }
                       : {};
-            const where = { deletedAt: null, ...statusWhere };
+            const where = {
+                deletedAt: null,
+                ...statusWhere,
+                ...(ambito === "personal" ? { visibility: PERSONAL_VISIBILITY, personalOwnerId: context.userId! } : { visibility: COMPANY_VISIBILITY }),
+            };
 
             const projects = await prisma.project.findMany({
                 where,
@@ -524,8 +541,8 @@ export function createTools(context: GilbertoToolContext = {}) {
         execute: async () => {
             if (!canUseFinance) return { error: "No tienes permiso para consultar el resumen financiero." };
             const [activeProjects, completedProjects, invoices, recentNotes] = await Promise.all([
-                prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
-                prisma.project.count({ where: { deletedAt: null, status: "Completado" } }),
+                prisma.project.count({ where: { deletedAt: null, visibility: COMPANY_VISIBILITY, status: { not: "Completado" } } }),
+                prisma.project.count({ where: { deletedAt: null, visibility: COMPANY_VISIBILITY, status: "Completado" } }),
                 prisma.invoice.groupBy({
                     by: ["status"],
                     where: { deletedAt: null },
@@ -533,7 +550,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                     _count: { id: true },
                 }),
                 prisma.note.findMany({
-                    where: { deletedAt: null },
+                    where: { deletedAt: null, visibility: COMPANY_VISIBILITY },
                     orderBy: { updatedAt: "desc" },
                     take: 5,
                     select: {
@@ -606,6 +623,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 prisma.project.findMany({
                     where: {
                         deletedAt: null,
+                        visibility: COMPANY_VISIBILITY,
                         status: { not: "Completado" },
                         updatedAt: { lt: staleDate },
                     },
@@ -622,6 +640,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 prisma.note.findMany({
                     where: {
                         deletedAt: null,
+                        visibility: COMPANY_VISIBILITY,
                         OR: [
                             { title: { contains: "pendiente", mode: "insensitive" } },
                             { content: { contains: "pendiente", mode: "insensitive" } },
@@ -659,17 +678,20 @@ export function createTools(context: GilbertoToolContext = {}) {
     }),
     buscarNotas: tool({
         description:
-            "Busca notas operativas por texto o carpeta. No busca ni devuelve secretos, credenciales ni datos de la Boveda.",
+            "Busca notas de empresa o notas personales del usuario por texto o carpeta. No busca ni devuelve secretos, credenciales ni datos de la Boveda.",
         inputSchema: z.object({
             query: z.string().default("").describe("Texto a buscar en titulo o contenido."),
             folder: z.string().default("").describe("Carpeta opcional."),
+            ambito: z.enum(["empresa", "personal"]).default("empresa").describe("Usa personal solo cuando el usuario se refiera a sus notas personales."),
         }),
-        execute: async ({ query, folder }) => {
+        execute: async ({ query, folder, ambito }) => {
+            if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para ver notas personales." };
             const q = query.trim();
             const cleanFolder = folder.trim();
             const notes = await prisma.note.findMany({
                 where: {
                     deletedAt: null,
+                    ...(ambito === "personal" ? { visibility: PERSONAL_VISIBILITY, personalOwnerId: context.userId! } : { visibility: COMPANY_VISIBILITY }),
                     ...(cleanFolder ? { folder: cleanFolder } : {}),
                     ...(q
                         ? {
@@ -1000,7 +1022,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 return confirmationRequired(context, "crearRequisitoProyecto", {
                     projectId: resolved.project.id,
                     projectName: resolved.project.name,
-                    clientName: resolved.project.client.name,
+                    clientName: resolved.project.client?.name ?? "Proyecto personal",
                     description,
                     category,
                     priority,
@@ -1165,11 +1187,11 @@ export function createTools(context: GilbertoToolContext = {}) {
 
             return {
                 objetivo,
-                to: project.client.email ?? "",
+                to: project.client?.email ?? "",
                 subject: `${project.name} - ${objetivo}`,
                 context: {
                     project: project.name,
-                    client: project.client.name,
+                    client: project.client?.name ?? "Proyecto personal",
                     status: project.status,
                     updatedAt: project.updatedAt.toISOString(),
                     pendingRequirements: project.requirements,
@@ -1219,9 +1241,10 @@ export function createTools(context: GilbertoToolContext = {}) {
                     },
                 });
 
-                if (!project) return { error: "No encontre el proyecto." };
-                projectContext = project;
-                recipient = project.client.email ?? "";
+                const client = project?.client;
+                if (!project || !client) return { error: "Este proyecto personal no tiene cliente ni correo asociado." };
+                projectContext = { id: project.id, name: project.name, client };
+                recipient = client.email ?? "";
             }
 
             if (!recipient || !isValidEmail(recipient)) {
@@ -1325,7 +1348,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                     select: { client: { select: { email: true } } },
                 });
 
-                recipient = project?.client.email ?? "";
+                recipient = project?.client?.email ?? "";
             }
 
             if (!recipient || !isValidEmail(recipient)) {
@@ -1353,18 +1376,22 @@ export function createTools(context: GilbertoToolContext = {}) {
     }),
     crearNota: tool({
         description:
-            "Crea una nota operativa en NoteCode. Sirve para registrar pendientes, ideas, mejoras o recordatorios generales. No guarda contrasenas ni secretos.",
+            "Crea una nota de empresa o una nota personal privada del usuario en NoteCode. No guarda contrasenas ni secretos.",
         inputSchema: z.object({
             title: z.string().min(1).max(120).describe("Titulo breve de la nota."),
             content: z.string().max(4000).default("").describe("Contenido de la nota."),
             folder: z.string().min(1).max(80).default("General").describe("Carpeta donde guardar la nota."),
+            ambito: z.enum(["empresa", "personal"]).default("empresa").describe("Usa personal si el usuario pide que sea solo suya."),
         }),
-        execute: async ({ title, content, folder }) => {
+        execute: async ({ title, content, folder, ambito }) => {
+            if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para guardar una nota personal." };
             const note = await prisma.note.create({
                 data: {
                     title,
                     content,
                     folder,
+                    visibility: ambito === "personal" ? PERSONAL_VISIBILITY : COMPANY_VISIBILITY,
+                    personalOwnerId: ambito === "personal" ? context.userId : null,
                 },
                 select: {
                     id: true,
@@ -1408,7 +1435,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 return confirmationRequired(context, "crearNotaProyecto", {
                     projectId: resolved.project.id,
                     projectName: resolved.project.name,
-                    clientName: resolved.project.client.name,
+                    clientName: resolved.project.client?.name ?? "Proyecto personal",
                     title,
                     content,
                 });
@@ -1420,6 +1447,8 @@ export function createTools(context: GilbertoToolContext = {}) {
                     title,
                     content,
                     folder: "Proyecto",
+                    visibility: resolved.project.visibility,
+                    personalOwnerId: resolved.project.visibility === PERSONAL_VISIBILITY ? context.userId : null,
                 },
                 select: {
                     id: true,
@@ -1460,6 +1489,9 @@ export function createTools(context: GilbertoToolContext = {}) {
 
             const current = await prisma.note.findUnique({ where: { id } });
             if (!current) return { error: "No encontre una nota con ese ID." };
+            if (current.visibility === PERSONAL_VISIBILITY && current.personalOwnerId !== context.userId) {
+                return { error: "No tienes acceso a esa nota personal." };
+            }
 
             const note = await prisma.note.update({
                 where: { id },
@@ -1491,11 +1523,13 @@ export function createTools(context: GilbertoToolContext = {}) {
         inputSchema: z.object({
             title: z.string().min(1).max(120),
             content: z.string().max(2000).default(""),
+            ambito: z.enum(["empresa", "personal"]).default("empresa"),
             confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
         }),
-        execute: async ({ title, content, confirmado }) => {
+        execute: async ({ title, content, ambito, confirmado }) => {
+            if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para guardar un pendiente personal." };
             if (!confirmado) {
-                return confirmationRequired(context, "crearPendiente", { title, content, folder: "Pendientes" });
+                return confirmationRequired(context, "crearPendiente", { title, content, folder: "Pendientes", ambito });
             }
 
             const note = await prisma.note.create({
@@ -1503,6 +1537,8 @@ export function createTools(context: GilbertoToolContext = {}) {
                     title,
                     content,
                     folder: "Pendientes",
+                    visibility: ambito === "personal" ? PERSONAL_VISIBILITY : COMPANY_VISIBILITY,
+                    personalOwnerId: ambito === "personal" ? context.userId : null,
                 },
                 select: {
                     id: true,
@@ -1523,33 +1559,39 @@ export function createTools(context: GilbertoToolContext = {}) {
     }),
     crearProyecto: tool({
         description:
-            "Crea un proyecto en NoteCode con cliente, estado y monto acordado en CLP. Requiere confirmacion explicita.",
+            "Crea un proyecto de empresa con cliente o un proyecto personal privado del usuario. Requiere confirmacion explicita.",
         inputSchema: z.object({
             name: z.string().min(1).max(160),
-            clientName: z.string().min(1).max(160),
+            clientName: z.string().max(160).default(""),
             description: z.string().max(2000).default(""),
             status: z.enum(["Planificado", "En progreso", "Revision", "Revisión", "Completado"]).default("Planificado"),
             agreedAmount: z.number().nonnegative().default(0).describe("Monto acordado en pesos chilenos."),
+            ambito: z.enum(["empresa", "personal"]).default("empresa").describe("Usa personal para un proyecto que solo pertenezca al usuario."),
             confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
         }),
-        execute: async ({ name, clientName, description, status, agreedAmount, confirmado }) => {
+        execute: async ({ name, clientName, description, status, agreedAmount, ambito, confirmado }) => {
+            if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para crear un proyecto personal." };
+            if (ambito === "empresa" && !clientName.trim()) return { error: "Necesito el cliente para crear un proyecto de empresa." };
             if (!confirmado) {
                 return confirmationRequired(context, "crearProyecto", {
                     name,
-                    clientName,
+                    clientName: ambito === "personal" ? null : clientName,
                     description,
                     status,
+                    ambito,
                     agreedAmountClp: formatClp(agreedAmount),
                 });
             }
 
-            const clientId = await resolveClientId({ clientName });
+            const clientId = ambito === "empresa" ? await resolveClientId({ clientName }) : null;
             const project = await prisma.project.create({
                 data: {
                     name,
                     description: description || null,
                     status,
                     agreedAmount,
+                    visibility: ambito === "personal" ? PERSONAL_VISIBILITY : COMPANY_VISIBILITY,
+                    personalOwnerId: ambito === "personal" ? context.userId : null,
                     clientId,
                 },
                 include: {
@@ -1557,7 +1599,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 },
             });
 
-            await syncProjectInvoice(project.id);
+            if (ambito === "empresa") await syncProjectInvoice(project.id);
             invalidateCache("projects:");
             invalidateCache("invoices");
 
@@ -1661,6 +1703,7 @@ export function createTools(context: GilbertoToolContext = {}) {
 
             let client: { id: string; name: string; company: string | null };
             if (project) {
+                if (!project.client) return { error: "Los proyectos personales no tienen cotizaciones ni cliente asociado." };
                 client = project.client;
                 const existing = await prisma.quote.findFirst({
                     where: { projectId: project.id, deletedAt: null },
@@ -2436,6 +2479,7 @@ export function createTools(context: GilbertoToolContext = {}) {
 
             let client: { id: string; name: string; company: string | null };
             if (resolvedProject?.project) {
+                if (!resolvedProject.project.client) return { error: "Los proyectos personales no pueden tener portal de cliente." };
                 client = resolvedProject.project.client;
             } else {
                 const resolvedClient = await resolveClientForTool(clientName);
@@ -2672,7 +2716,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 return {
                     id: project.id,
                     project: project.name,
-                    client: project.client.name,
+                    client: project.client?.name ?? "Proyecto personal",
                     hours,
                     revenue,
                     revenueClp: formatClp(revenue),

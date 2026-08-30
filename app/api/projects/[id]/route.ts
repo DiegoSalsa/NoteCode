@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
 import { cached, invalidateCache } from "@/lib/server-cache";
 import { canManage, getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject, isPersonalProject, projectAccessWhere } from "@/lib/personal-workspace";
 
 const MASKED_SECRET = "************";
 
@@ -11,10 +12,14 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await getCurrentUser();
+        if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
         const { id } = await params;
-        const data = await cached(`project:${id}`, 30_000, async () => {
-            const project = await prisma.project.findUnique({
-                where: { id, deletedAt: null },
+        const accessible = await findAccessibleProject(id, user.id);
+        if (!accessible) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+        const data = await cached(`project:${id}:${accessible.visibility === "PERSONAL" ? user.id : "company"}`, 30_000, async () => {
+            const project = await prisma.project.findFirst({
+                where: projectAccessWhere(id, user.id),
                 include: {
                     client: { select: { id: true, name: true } },
                     owner: { select: { id: true, name: true } },
@@ -32,7 +37,14 @@ export async function GET(
                             updatedAt: true,
                         },
                     },
-                    notes: { where: { deletedAt: null }, orderBy: { updatedAt: "desc" } },
+                    notes: {
+                        where: {
+                            deletedAt: null,
+                            visibility: accessible.visibility,
+                            ...(isPersonalProject(accessible) ? { personalOwnerId: user.id } : {}),
+                        },
+                        orderBy: { updatedAt: "desc" },
+                    },
                     documents: {
                         orderBy: { updatedAt: "desc" },
                         select: { id: true, name: true, category: true, size: true, clientVisible: true, updatedAt: true, createdAt: true },
@@ -189,13 +201,14 @@ export async function PATCH(
 ) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para modificar proyectos." }, { status: 403 });
     try {
         const { id } = await params;
         const body = await request.json();
-        const existing = await prisma.project.findUnique({ where: { id }, select: { status: true } });
+        const existing = await findAccessibleProject(id, user.id);
         if (!existing) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-        const clientId = body.clientId || body.clientName
+        const personal = isPersonalProject(existing);
+        if (!personal && !canManage(user)) return NextResponse.json({ error: "Sin permisos para modificar proyectos." }, { status: 403 });
+        const clientId = !personal && (body.clientId || body.clientName)
             ? await resolveClientId({ clientId: body.clientId, clientName: body.clientName })
             : undefined;
         const project = await prisma.project.update({
@@ -210,7 +223,7 @@ export async function PATCH(
                 budgetCost: body.budgetCost === undefined ? undefined : Number(body.budgetCost) || 0,
                 startDate: body.startDate === undefined ? undefined : body.startDate ? new Date(body.startDate) : null,
                 targetDate: body.targetDate === undefined ? undefined : body.targetDate ? new Date(body.targetDate) : null,
-                ownerId: body.ownerId === undefined ? undefined : body.ownerId || null,
+                ownerId: personal ? undefined : body.ownerId === undefined ? undefined : body.ownerId || null,
                 clientId,
                 statusLogs: body.status && body.status !== existing.status
                     ? { create: { status: body.status, note: body.statusNote || "Actualizado desde la ficha del proyecto" } }
@@ -218,7 +231,7 @@ export async function PATCH(
             },
             include: { client: { select: { id: true, name: true } } },
         });
-        await syncProjectInvoice(project.id);
+        if (!personal) await syncProjectInvoice(project.id);
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");
         invalidateCache("erp:");
@@ -235,9 +248,13 @@ export async function DELETE(
 ) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para eliminar proyectos." }, { status: 403 });
     try {
         const { id } = await params;
+        const existing = await findAccessibleProject(id, user.id);
+        if (!existing) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+        if (!isPersonalProject(existing) && !canManage(user)) {
+            return NextResponse.json({ error: "Sin permisos para eliminar proyectos." }, { status: 403 });
+        }
         await prisma.project.update({
             where: { id },
             data: { deletedAt: new Date() },

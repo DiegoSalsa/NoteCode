@@ -23,7 +23,7 @@ type Credential = {
 type Project = {
   id: string;
   name: string;
-  client: { name: string };
+  client: { name: string } | null;
 };
 
 type VaultPayload = {
@@ -292,7 +292,7 @@ export default function BovedaPage() {
                   <option value="">Seleccionar proyecto</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
-                      {project.name} / {project.client.name}
+                      {project.name} / {project.client?.name ?? "Solo para ti"}
                     </option>
                   ))}
                 </select>

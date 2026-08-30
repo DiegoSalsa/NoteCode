@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { cached, invalidateCache } from "@/lib/server-cache";
 import { uploadDocumentFile } from "@/lib/storage";
 import { documentFileName } from "@/lib/document-files";
+import { COMPANY_VISIBILITY, PERSONAL_VISIBILITY } from "@/lib/personal-workspace";
 
 const DEFAULT_TAKE = 50;
 const MAX_TAKE = 100;
@@ -33,8 +34,18 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category")?.trim() || "";
     const skip = Math.max(0, Number(searchParams.get("skip") ?? "0") || 0);
     const take = Math.min(MAX_TAKE, Math.max(1, Number(searchParams.get("take") ?? DEFAULT_TAKE) || DEFAULT_TAKE));
-    const where = {
+    const accessWhere = {
       deletedAt: null,
+      OR: [
+        { projectId: null },
+        { project: { visibility: COMPANY_VISIBILITY } },
+        { project: { visibility: PERSONAL_VISIBILITY, personalOwnerId: user.id } },
+      ],
+    };
+    const where = {
+      AND: [
+        accessWhere,
+        {
       ...(category ? { category } : {}),
       ...(q
         ? {
@@ -44,9 +55,11 @@ export async function GET(request: NextRequest) {
             ],
           }
         : {}),
+        },
+      ],
     };
 
-    const data = await cached(`documents:${q}:${category}:${skip}:${take}`, 30_000, async () => {
+    const data = await cached(`documents:${user.id}:${q}:${category}:${skip}:${take}`, 30_000, async () => {
       const [documents, total, categoryRows] = await Promise.all([
         prisma.document.findMany({
           where,
@@ -65,7 +78,7 @@ export async function GET(request: NextRequest) {
         }),
         prisma.document.count({ where }),
         prisma.document.findMany({
-          where: { deletedAt: null },
+          where: accessWhere,
           distinct: ["category"],
           orderBy: { category: "asc" },
           select: { category: true },

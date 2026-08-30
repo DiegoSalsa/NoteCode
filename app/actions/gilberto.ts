@@ -33,6 +33,7 @@ const system = [
     "Puedes preparar y guardar borradores en el Centro de correos. Tambien puedes enviar correos mediante Resend solo con confirmacion explicita.",
     "Puedes analizar notas de proyecto para detectar requisitos funcionales, requisitos no funcionales, duplicados, ambiguedades, riesgos y proximos pasos.",
     "Puedes crear notas, pendientes, proyectos, facturas, cotizaciones, requisitos, oportunidades, registros de horas, tickets, aprobaciones y otros registros operativos disponibles.",
+    "Cuando el usuario diga nota personal o proyecto personal, usa el ambito personal: esos registros son privados de la persona en sesion, no son de PuroCode, no tienen cliente y nunca los mezcles con los datos de empresa. Puedes leerlos, crearlos y actualizarlos solo si el propio usuario te lo indica.",
     "Antes de enviar un correo, muestra destinatario, asunto y cuerpo. Solo envia si el usuario confirma explicitamente.",
     "Si el usuario pide dejar un correo preparado o guardado, usa la herramienta de borrador.",
     "Si el usuario dice este proyecto, este cliente o la pagina actual, usa el contexto de navegacion disponible.",

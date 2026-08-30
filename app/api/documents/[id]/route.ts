@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { downloadDocumentFile } from "@/lib/storage";
 import { attachmentContentDisposition, documentFileName } from "@/lib/document-files";
+import { PERSONAL_VISIBILITY } from "@/lib/personal-workspace";
 
 export async function GET(
   _request: NextRequest,
@@ -22,10 +23,14 @@ export async function GET(
         fileData: true,
         storagePath: true,
         storageBucket: true,
+        project: { select: { visibility: true, personalOwnerId: true } },
       },
     });
 
     if (!document) {
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    }
+    if (document.project?.visibility === PERSONAL_VISIBILITY && document.project.personalOwnerId !== user.id) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
@@ -62,12 +67,19 @@ export async function PATCH(
 ) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para publicar documentos." }, { status: 403 });
   const { id } = await params;
   const body = await request.json() as { clientVisible?: boolean };
+  const current = await prisma.document.findFirst({
+    where: { id, deletedAt: null },
+    select: { project: { select: { visibility: true, personalOwnerId: true } } },
+  });
+  if (!current) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  const personal = current.project?.visibility === PERSONAL_VISIBILITY;
+  if (personal && current.project?.personalOwnerId !== user.id) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  if (!personal && !canManage(user)) return NextResponse.json({ error: "Sin permisos para publicar documentos." }, { status: 403 });
   const document = await prisma.document.update({
     where: { id },
-    data: { clientVisible: body.clientVisible },
+    data: { clientVisible: personal ? false : body.clientVisible },
     select: { id: true, projectId: true, clientVisible: true },
   });
   invalidateCache("documents");
@@ -83,16 +95,18 @@ export async function DELETE(
     try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para eliminar documentos." }, { status: 403 });
     const { id } = await params;
     const document = await prisma.document.findFirst({
       where: { id, deletedAt: null },
-      select: { name: true, storagePath: true, storageBucket: true, projectId: true },
+      select: { name: true, storagePath: true, storageBucket: true, projectId: true, project: { select: { visibility: true, personalOwnerId: true } } },
     });
 
     if (!document) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
+    const personal = document.project?.visibility === PERSONAL_VISIBILITY;
+    if (personal && document.project?.personalOwnerId !== user.id) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!personal && !canManage(user)) return NextResponse.json({ error: "Sin permisos para eliminar documentos." }, { status: 403 });
 
     await prisma.document.update({ where: { id }, data: { deletedAt: new Date() } });
     invalidateCache("documents");

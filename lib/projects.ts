@@ -48,7 +48,7 @@ export async function syncProjectInvoice(projectId: string) {
     },
   });
 
-  if (!project || project.status !== COMPLETED_STATUS) return;
+  if (!project || !project.client || project.status !== COMPLETED_STATUS) return;
   const approvedQuote = project.quotes[0];
   const quoteSubtotal = approvedQuote?.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) ?? 0;
   const billingAmount = approvedQuote

@@ -10,6 +10,7 @@ import {
     Trash2,
     X,
     ArrowUpRight,
+    LockKeyhole,
 } from "lucide-react";
 import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
 import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
@@ -29,10 +30,11 @@ type Project = {
     startDate: string | null;
     targetDate: string | null;
     ownerId: string | null;
-    clientId: string;
+    clientId: string | null;
     createdAt: string;
     updatedAt: string;
-    client: Client;
+    visibility: string;
+    client: Client | null;
 };
 
 type ProjectsPayload = {
@@ -74,6 +76,7 @@ export default function ProyectosPage() {
     const [hasMore, setHasMore] = useState(Boolean(cached?.hasMore));
     const [total, setTotal] = useState(cached?.total ?? projects.length);
     const [search, setSearch] = useState("");
+    const [scope, setScope] = useState<"company" | "personal">("company");
     const debouncedSearch = useDebounce(search);
 
     // Modal state
@@ -96,8 +99,8 @@ export default function ProyectosPage() {
     }, [cached]);
 
     const fetchData = useCallback(async ({ append = false, skip = 0 } = {}) => {
-        const params = new URLSearchParams({ q: debouncedSearch, skip: String(skip), take: "25" });
-        const key = `projects:init:${debouncedSearch}:${skip}:25`;
+        const params = new URLSearchParams({ q: debouncedSearch, scope, skip: String(skip), take: "25" });
+        const key = `projects:init:${scope}:${debouncedSearch}:${skip}:25`;
         const data = await fetchAndCacheJson<Partial<ProjectsPayload>>(key, `/api/projects/init?${params.toString()}`);
         const items = Array.isArray(data.projects) ? data.projects : [];
         setError("");
@@ -109,7 +112,7 @@ export default function ProyectosPage() {
         setTotal(data.total ?? items.length);
         setLoading(false);
         setLoadingMore(false);
-    }, [debouncedSearch]);
+    }, [debouncedSearch, scope]);
 
     useEffect(() => {
         if (!projects.length) setLoading(true);
@@ -131,7 +134,7 @@ export default function ProyectosPage() {
 
     function openEdit(p: Project) {
         setEditing(p);
-        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId, clientName: p.client.name, agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "" });
+        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId || "", clientName: p.client?.name || "", agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "" });
         setModalOpen(true);
     }
 
@@ -143,14 +146,14 @@ export default function ProyectosPage() {
                 const response = await fetch(`/api/projects/${editing.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
+                    body: JSON.stringify({ ...form, scope, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
                 });
                 if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "No se pudo actualizar el proyecto.");
             } else {
                 const response = await fetch("/api/projects", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...form, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
+                    body: JSON.stringify({ ...form, scope, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
                 });
                 if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "No se pudo crear el proyecto.");
             }
@@ -198,15 +201,20 @@ export default function ProyectosPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Proyectos</h1>
-                        <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos</p>
+                        <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos {scope === "personal" ? "personales" : "de empresa"}</p>
                     </div>
                     <button
                         onClick={openCreate}
                         className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
                     >
                         <Plus size={15} strokeWidth={2} />
-                        Nuevo Proyecto
+                        {scope === "personal" ? "Nuevo Proyecto Personal" : "Nuevo Proyecto"}
                     </button>
+                </div>
+
+                <div className="inline-flex rounded-lg border border-white/10 bg-neutral-900 p-1" role="tablist" aria-label="Tipo de proyectos">
+                    <button type="button" onClick={() => setScope("company")} className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${scope === "company" ? "bg-neutral-100 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"}`}>Empresa</button>
+                    <button type="button" onClick={() => setScope("personal")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${scope === "personal" ? "bg-neutral-100 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"}`}><LockKeyhole size={12} />Personales</button>
                 </div>
 
                 {error && (
@@ -245,9 +253,9 @@ export default function ProyectosPage() {
                                 >
                                     {project.name}
                                 </ProjectPrefetchLink>
-                                <p className="text-[12px] text-neutral-500 mt-0.5">{project.client.name}</p>
+                                <p className="text-[12px] text-neutral-500 mt-0.5">{project.client?.name || "Solo para ti"}</p>
                                 <p className="text-[12px] text-neutral-600 mt-0.5">
-                                    Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}
+                                    {scope === "personal" ? "Presupuesto personal" : "Valor acordado"}: ${(project.agreedAmount || 0).toLocaleString()}
                                 </p>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4">
@@ -298,7 +306,7 @@ export default function ProyectosPage() {
                     <div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-[17px] font-semibold text-neutral-100">
-                                {editing ? "Editar Proyecto" : "Nuevo Proyecto"}
+                                {editing ? "Editar Proyecto" : scope === "personal" ? "Nuevo Proyecto Personal" : "Nuevo Proyecto"}
                             </h2>
                             <button onClick={() => setModalOpen(false)} className="p-1 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
                                 <X size={16} strokeWidth={1.5} />
@@ -325,7 +333,7 @@ export default function ProyectosPage() {
                                     placeholder="Opcional"
                                 />
                             </div>
-                            <div className="relative">
+                            {scope === "company" && <div className="relative">
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Cliente</label>
                                 <input
                                     required
@@ -348,9 +356,9 @@ export default function ProyectosPage() {
                                         ))}
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                             <div>
-                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Valor acordado ($)</label>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">{scope === "personal" ? "Presupuesto personal ($)" : "Valor acordado ($)"}</label>
                                 <input
                                     required
                                     type="number"
@@ -363,13 +371,13 @@ export default function ProyectosPage() {
                                 />
                             </div>
                             <div className="grid gap-4 sm:grid-cols-2">
-                                <div>
+                                {scope === "company" && <div>
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Responsable</label>
                                     <select value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100">
                                         <option value="">Sin asignar</option>
                                         {team.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
                                     </select>
-                                </div>
+                                </div>}
                                 <div>
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Horas presupuestadas</label>
                                     <input type="number" min="0" step="0.5" value={form.budgetHours} onChange={(e) => setForm({ ...form, budgetHours: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />

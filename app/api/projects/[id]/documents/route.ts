@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { uploadDocumentFile } from "@/lib/storage";
 import { documentFileName } from "@/lib/document-files";
+import { getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject } from "@/lib/personal-workspace";
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 
@@ -11,12 +13,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id } = await params;
 
-    const project = await prisma.project.findUnique({
-      where: { id },
-      select: { id: true },
-    });
+    const project = await findAccessibleProject(id, user.id);
 
     if (!project) {
       return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });

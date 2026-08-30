@@ -75,7 +75,7 @@ export async function GET(
             pendingApprovals,
           ] = await Promise.all([
             prisma.opportunity.count({ where: { deletedAt: null, stage: { notIn: ["Ganado", "Perdido"] } } }),
-            prisma.project.count({ where: { deletedAt: null, status: { not: "Completado" } } }),
+            prisma.project.count({ where: { deletedAt: null, visibility: "COMPANY", status: { not: "Completado" } } }),
             prisma.supportTicket.count({ where: { deletedAt: null, status: { notIn: ["Resuelto", "Cerrado"] } } }),
             prisma.invoice.count({ where: { deletedAt: null, status: { in: ["Pendiente", "Vencido"] }, dueDate: { lt: now } } }),
             prisma.opportunity.aggregate({
@@ -127,7 +127,7 @@ export async function GET(
         const options = await cached("erp:options", 120_000, async () => {
           const [clients, projects, tasks, team, suppliers, invoices, opportunities, accounts, payrollPeriods] = await Promise.all([
             prisma.client.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true, company: true } }),
-            prisma.project.findMany({ where: { deletedAt: null }, orderBy: { updatedAt: "desc" }, take: 300, select: { id: true, name: true, clientId: true } }),
+            prisma.project.findMany({ where: { deletedAt: null, visibility: "COMPANY" }, orderBy: { updatedAt: "desc" }, take: 300, select: { id: true, name: true, clientId: true } }),
             prisma.projectTask.findMany({ orderBy: { updatedAt: "desc" }, take: 500, select: { id: true, title: true, projectId: true, status: true } }),
             prisma.teamMember.findMany({ where: { deletedAt: null, active: true }, orderBy: { name: "asc" }, take: 200, select: { id: true, name: true } }),
             prisma.supplier.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, take: 300, select: { id: true, name: true } }),
@@ -204,6 +204,7 @@ export async function GET(
         const projects = await prisma.project.findMany({
           where: {
             deletedAt: null,
+            visibility: "COMPANY",
             ...(q ? {
               OR: [
                 { name: { contains: q, mode: "insensitive" } },

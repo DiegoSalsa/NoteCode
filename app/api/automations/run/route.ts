@@ -17,7 +17,7 @@ async function executeAutomations(forceRoutinesForUserId?: string) {
     prisma.automationRule.findMany({ where: { active: true } }),
     prisma.invoice.findMany({ where: { deletedAt: null, status: { in: ["Pendiente", "Parcial"] }, dueDate: { lt: now } }, take: 50 }),
     prisma.projectTask.findMany({ where: { status: { not: "Hecho" }, dueDate: { lt: now } }, include: { project: { select: { name: true } } }, take: 50 }),
-    prisma.project.findMany({ where: { deletedAt: null, status: { not: "Completado" }, updatedAt: { lt: inactiveSince } }, take: 50 }),
+    prisma.project.findMany({ where: { deletedAt: null, visibility: "COMPANY", status: { not: "Completado" }, updatedAt: { lt: inactiveSince } }, take: 50 }),
     prisma.supportContract.findMany({ where: { deletedAt: null, status: "Activo", endDate: { gte: now, lte: inSevenDays } }, take: 50 }),
     prisma.supportTicket.findMany({ where: { deletedAt: null, status: { notIn: ["Resuelto", "Cerrado"] }, resolutionDue: { lt: now } }, take: 50 }),
     prisma.quote.findMany({ where: { deletedAt: null, status: { in: ["Borrador", "Enviada"] }, validUntil: { gte: now, lte: inSevenDays } }, take: 50 }),

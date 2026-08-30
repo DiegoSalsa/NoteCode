@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
+import { getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject } from "@/lib/personal-workspace";
 
 const taskSchema = z.object({
   title: z.string().trim().min(1).max(180),
@@ -23,7 +25,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id } = await params;
+    if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const tasks = await prisma.projectTask.findMany({
       where: { projectId: id },
       orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
@@ -40,7 +45,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id } = await params;
+    if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const body = taskSchema.safeParse(await request.json());
     if (!body.success) {
       return NextResponse.json({ error: "Invalid task payload" }, { status: 400 });

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
 import { invalidateCache } from "@/lib/server-cache";
+import { getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject } from "@/lib/personal-workspace";
 
 const MASKED_SECRET = "************";
 
@@ -10,8 +12,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id } = await params;
     const body = await request.json();
+    const current = await prisma.credential.findFirst({ where: { id, deletedAt: null }, select: { projectId: true } });
+    if (!current) return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    if (current.projectId && !await findAccessibleProject(current.projectId, user.id)) {
+      return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    }
     const data: {
       name?: string;
       username?: string;
@@ -50,7 +59,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id } = await params;
+    const current = await prisma.credential.findFirst({ where: { id, deletedAt: null }, select: { projectId: true } });
+    if (!current) return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    if (current.projectId && !await findAccessibleProject(current.projectId, user.id)) {
+      return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    }
     const credential = await prisma.credential.update({
       where: { id },
       data: { deletedAt: new Date() },

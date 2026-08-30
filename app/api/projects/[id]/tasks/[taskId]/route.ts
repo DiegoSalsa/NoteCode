@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
+import { getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject } from "@/lib/personal-workspace";
 
 const taskPatchSchema = z.object({
   title: z.string().trim().min(1).max(180).optional(),
@@ -24,7 +26,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; taskId: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id, taskId } = await params;
+    if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const body = taskPatchSchema.safeParse(await request.json());
     if (!body.success) {
       return NextResponse.json({ error: "Invalid task payload" }, { status: 400 });
@@ -61,7 +66,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; taskId: string }> },
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id, taskId } = await params;
+    if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const result = await prisma.projectTask.deleteMany({
       where: { id: taskId, projectId: id },
     });

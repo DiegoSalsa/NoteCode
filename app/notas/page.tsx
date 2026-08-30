@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Search, Pencil, Trash2, X, FolderKanban } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, FolderKanban, LockKeyhole } from "lucide-react";
 import { clearCachedJsonByPrefix, fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
@@ -40,6 +40,7 @@ export default function NotasPage() {
     const [total, setTotal] = useState(cached?.total ?? notes.length);
     const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState("");
+    const [scope, setScope] = useState<"company" | "personal">("company");
     const debouncedSearch = useDebounce(search);
     const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
     const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -65,10 +66,11 @@ export default function NotasPage() {
             const params = new URLSearchParams({
                 q: debouncedSearch,
                 folder: selectedFolder ?? "",
+                scope,
                 skip: String(skip),
                 take: "30",
             });
-            const key = `notes:${debouncedSearch}:${selectedFolder ?? ""}:${skip}:30`;
+            const key = `notes:${scope}:${debouncedSearch}:${selectedFolder ?? ""}:${skip}:30`;
             const data = await fetchAndCacheJson<NotesPayload>(key, `/api/notes?${params.toString()}`);
             const items = asArray<Note>(data.items);
             setError(null);
@@ -83,7 +85,7 @@ export default function NotasPage() {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [debouncedSearch, selectedFolder]);
+    }, [debouncedSearch, selectedFolder, scope]);
 
     useEffect(() => {
         if (!notes.length) setLoading(true);
@@ -119,7 +121,7 @@ export default function NotasPage() {
                 const response = await fetch(`/api/notes/${editing.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(form),
+                    body: JSON.stringify({ ...form, scope }),
                 });
 
                 if (!response.ok) throw new Error("Failed to update note");
@@ -130,7 +132,7 @@ export default function NotasPage() {
                 const response = await fetch("/api/notes", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(form),
+                    body: JSON.stringify({ ...form, scope }),
                 });
 
                 if (!response.ok) throw new Error("Failed to create note");
@@ -183,12 +185,16 @@ export default function NotasPage() {
             <div className="flex shrink-0 flex-col border-b border-white/10 bg-neutral-950 lg:w-56 lg:border-b-0 lg:border-r">
                 <div className="px-4 py-4 border-b border-white/10">
                     {error && <p className="mb-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">{error}</p>}
+                    <div className="mb-3 inline-flex w-full rounded-md border border-white/10 bg-neutral-900 p-1">
+                        <button type="button" onClick={() => { setScope("company"); setSelectedFolder(null); setSelectedNoteId(null); }} className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${scope === "company" ? "bg-neutral-100 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"}`}>Empresa</button>
+                        <button type="button" onClick={() => { setScope("personal"); setSelectedFolder(null); setSelectedNoteId(null); }} className={`inline-flex flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium ${scope === "personal" ? "bg-neutral-100 text-neutral-950" : "text-neutral-400 hover:text-neutral-200"}`}><LockKeyhole size={11} />Personales</button>
+                    </div>
                     <button
                         onClick={openCreate}
                         className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-neutral-100 px-3 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white transition-colors"
                     >
                         <Plus size={14} strokeWidth={2} />
-                        Nueva Nota
+                        {scope === "personal" ? "Nueva Nota Personal" : "Nueva Nota"}
                     </button>
                 </div>
                 <div className="overflow-x-auto px-2 py-2 lg:flex-1 lg:overflow-y-auto">
@@ -214,7 +220,7 @@ export default function NotasPage() {
                     </div>
                 </div>
                 <div className="px-4 py-3 border-t border-white/10">
-                    <p className="text-[11px] text-neutral-600">{total} notas</p>
+                    <p className="text-[11px] text-neutral-600">{total} notas {scope === "personal" ? "personales" : "de empresa"}</p>
                 </div>
             </div>
 
@@ -320,7 +326,7 @@ export default function NotasPage() {
                     <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-[17px] font-semibold text-neutral-100">
-                                {editing ? "Editar Nota" : "Nueva Nota"}
+                                {editing ? "Editar Nota" : scope === "personal" ? "Nueva Nota Personal" : "Nueva Nota"}
                             </h2>
                             <button onClick={() => setModalOpen(false)} className="p-1 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
                                 <X size={16} strokeWidth={1.5} />

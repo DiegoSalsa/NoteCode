@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { decryptString, encryptString } from "@/lib/crypto";
 import { getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
+import { findAccessibleProject } from "@/lib/personal-workspace";
 
 type SaveCredentialInput = {
   projectId?: string;
@@ -16,6 +17,11 @@ export async function saveCredential(data: SaveCredentialInput) {
     throw new Error("name, username and password are required.");
   }
 
+  const user = await getCurrentUser();
+  if (!user) throw new Error("Unauthorized.");
+  if (data.projectId && !await findAccessibleProject(data.projectId, user.id)) {
+    throw new Error("Project not found.");
+  }
   const credential = await prisma.credential.create({
     data: {
       projectId: data.projectId || null,
@@ -50,10 +56,13 @@ export async function revealCredential(credentialId: string) {
 
   const credential = await prisma.credential.findUnique({
     where: { id: credentialId, deletedAt: null },
-    select: { id: true, secretData: true },
+    select: { id: true, secretData: true, projectId: true },
   });
 
   if (!credential) {
+    throw new Error("Credential not found.");
+  }
+  if (credential.projectId && !await findAccessibleProject(credential.projectId, user.id)) {
     throw new Error("Credential not found.");
   }
 

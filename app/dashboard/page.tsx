@@ -89,7 +89,7 @@ async function SummaryCards() {
     "dashboard:summary",
     60_000,
     () => Promise.all([
-      prisma.project.count({ where: { deletedAt: null } }),
+      prisma.project.count({ where: { deletedAt: null, visibility: "COMPANY" } }),
       prisma.credential.count({ where: { deletedAt: null } }),
       prisma.invoice.count({ where: { deletedAt: null, status: "Pendiente" } }),
       prisma.invoice.aggregate({
@@ -156,7 +156,7 @@ async function SummaryCards() {
 async function RecentProjects() {
   const projects = await cached("dashboard:recent-projects", 60_000, () =>
     prisma.project.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, visibility: "COMPANY" },
       orderBy: { updatedAt: "desc" },
       take: 5,
       select: {
@@ -187,7 +187,7 @@ async function RecentProjects() {
               >
                 {project.name}
               </ProjectPrefetchLink>
-              <p className="mt-0.5 text-[12px] text-neutral-500">{project.client.name}</p>
+              <p className="mt-0.5 text-[12px] text-neutral-500">{project.client?.name ?? "Sin cliente"}</p>
             </div>
             <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4">
               <StatusBadge status={project.status} />

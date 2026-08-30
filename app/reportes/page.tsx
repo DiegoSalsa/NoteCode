@@ -48,7 +48,7 @@ async function ReportsContent() {
     60_000,
     () => Promise.all([
       prisma.project.findMany({
-        where: { deletedAt: null },
+        where: { deletedAt: null, visibility: "COMPANY" },
         orderBy: { updatedAt: "desc" },
         include: {
           client: { select: { name: true } },
@@ -76,7 +76,7 @@ async function ReportsContent() {
     const collected = project.invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0), 0);
     const totalCost = laborCost + expenseCost;
     const revenueBase = invoiced || project.agreedAmount;
-    return { ...project, hours, laborCost, expenseCost, totalCost, invoiced, collected, margin: revenueBase - totalCost, marginRate: revenueBase > 0 ? (revenueBase - totalCost) / revenueBase : 0 };
+    return { ...project, client: project.client ?? { name: "Sin cliente" }, hours, laborCost, expenseCost, totalCost, invoiced, collected, margin: revenueBase - totalCost, marginRate: revenueBase > 0 ? (revenueBase - totalCost) / revenueBase : 0 };
   });
 
   const totals = profitability.reduce((result, project) => ({

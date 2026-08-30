@@ -34,7 +34,8 @@ type ProjectData = {
     description: string | null;
     status: string;
     agreedAmount: number;
-    client: { id: string; name: string };
+    visibility: string;
+    client: { id: string; name: string } | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -225,6 +226,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     // Note form
     const [noteOpen, setNoteOpen] = useState(false);
+    const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
     const [noteTitle, setNoteTitle] = useState("");
     const [noteContent, setNoteContent] = useState("");
 
@@ -434,16 +436,43 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         await fetchAll();
     }
 
-    async function addNote() {
-        if (!noteTitle.trim()) return;
-        await checkedFetch(`/api/projects/${id}/notes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title: noteTitle, content: noteContent }),
-        });
-        setNoteOpen(false);
+    function openCreateNote() {
+        setEditingNoteId(null);
         setNoteTitle("");
         setNoteContent("");
+        setNoteOpen(true);
+    }
+
+    function openEditNote(note: ProjectNote) {
+        setEditingNoteId(note.id);
+        setNoteTitle(note.title);
+        setNoteContent(note.content);
+        setNoteOpen(true);
+    }
+
+    function closeNoteModal() {
+        setNoteOpen(false);
+        setEditingNoteId(null);
+        setNoteTitle("");
+        setNoteContent("");
+    }
+
+    async function saveNote() {
+        if (!noteTitle.trim()) return;
+        if (editingNoteId) {
+            await checkedFetch(`/api/projects/${id}/notes/${editingNoteId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: noteTitle, content: noteContent }),
+            });
+        } else {
+            await checkedFetch(`/api/projects/${id}/notes`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: noteTitle, content: noteContent }),
+            });
+        }
+        closeNoteModal();
         await fetchAll();
     }
 
@@ -525,6 +554,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         );
     }
 
+    const personalProject = project.visibility === "PERSONAL";
     const tabs = [
         { key: "overview", label: "General", count: null },
         { key: "commercial", label: "Comercial", count: operations?.quotes?.length ?? 0 },
@@ -536,7 +566,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         { key: "credentials", label: "Credenciales", count: creds.length },
         { key: "notes", label: "Notas", count: notes.length },
         { key: "documents", label: "Documentos", count: documents.length },
-    ];
+    ].filter((item) => !personalProject || (item.key !== "commercial" && item.key !== "operations"));
 
     return (
         <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
@@ -549,10 +579,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">{project.name}</h1>
-                        <p className="text-[14px] text-neutral-500 mt-1">{project.client.name}</p>
-                        <p className="text-[13px] text-neutral-500 mt-1">
-                            Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}
-                        </p>
+                        <p className="text-[14px] text-neutral-500 mt-1">{personalProject ? "Proyecto personal · solo para ti" : project.client?.name}</p>
+                        {!personalProject && <p className="text-[13px] text-neutral-500 mt-1">Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}</p>}
                         {project.description && (
                             <p className="text-[14px] text-neutral-400 mt-2 max-w-2xl">{project.description}</p>
                         )}
@@ -631,7 +659,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
             )}
 
-            {tab === "commercial" && operations && (
+            {tab === "commercial" && !personalProject && operations && project.client && (
                 <ProjectCommercial
                     projectId={id}
                     clientId={project.client.id}
@@ -642,7 +670,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 />
             )}
 
-            {tab === "operations" && operations && (
+            {tab === "operations" && !personalProject && operations && (
                 <div className="space-y-5">
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                         <OperationMetric label="Horas" value={`${operations.totals.hours.toLocaleString("es-CL")} h`} icon={Clock3} />
@@ -913,7 +941,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {/* Tab: Notes */}
             {tab === "notes" && (
                 <div className="space-y-4">
-                    <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
+                    <button onClick={openCreateNote} className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
                         <Plus size={14} strokeWidth={2} />
                         Nueva Nota
                     </button>
@@ -929,7 +957,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-                                        <button onClick={() => { setNoteTitle(n.title); setNoteContent(n.content); setNoteOpen(true); }} className="p-1.5 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
+                                        <button onClick={() => openEditNote(n)} className="p-1.5 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/5">
                                             <Pencil size={13} strokeWidth={1.5} />
                                         </button>
                                         <button onClick={() => deleteNote(n.id)} className="p-1.5 rounded text-neutral-500 hover:text-red-400 hover:bg-white/5">
@@ -946,13 +974,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
                             <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 sm:p-6">
                                 <div className="flex items-center justify-between mb-6">
-                                    <h2 className="text-[17px] font-semibold text-neutral-100">Nueva Nota</h2>
-                                    <button onClick={() => setNoteOpen(false)} className="p-1"><X size={16} /></button>
+                                    <h2 className="text-[17px] font-semibold text-neutral-100">{editingNoteId ? "Editar Nota" : "Nueva Nota"}</h2>
+                                    <button onClick={closeNoteModal} className="p-1"><X size={16} /></button>
                                 </div>
-                                <form onSubmit={e => { e.preventDefault(); addNote(); }} className="space-y-4">
+                                <form onSubmit={e => { e.preventDefault(); saveNote(); }} className="space-y-4">
                                     <input required placeholder="Título de la nota" value={noteTitle} onChange={e => setNoteTitle(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <textarea rows={6} placeholder="Contenido..." value={noteContent} onChange={e => setNoteContent(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 resize-none" />
-                                    <button type="submit" className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">Crear Nota</button>
+                                    <button type="submit" className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">{editingNoteId ? "Guardar cambios" : "Crear Nota"}</button>
                                 </form>
                             </div>
                         </div>
