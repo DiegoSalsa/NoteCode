@@ -17,8 +17,10 @@ import {
   Mail,
   MoreHorizontal,
   NotebookPen,
+  Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
   User,
 } from "lucide-react";
 import { logout } from "@/app/actions/auth";
@@ -29,6 +31,8 @@ const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Gilberto", href: "/gilberto", icon: Bot, cacheKey: "gilberto:history", api: "/api/gilberto/history" },
   { label: "Proyectos", href: "/proyectos", icon: FolderKanban, cacheKey: "projects:init::0:25", api: "/api/projects/init?q=&skip=0&take=25" },
+  { label: "Buscar", href: "/buscar", icon: Search },
+  { label: "Papelera", href: "/papelera", icon: Trash2, cacheKey: "trash", api: "/api/trash" },
   { label: "Gestión", href: "/erp", icon: BriefcaseBusiness, cacheKey: "erp:projects", api: "/api/erp/projects" },
   { label: "Reportes", href: "/reportes", icon: BarChart3, roles: ["ADMIN", "MANAGER", "FINANCE"] },
   { label: "Actividad", href: "/notificaciones", icon: Bell, cacheKey: "erp:notifications", api: "/api/erp/notifications" },

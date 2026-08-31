@@ -35,6 +35,7 @@ export function CredentialCard({ credential }: CredentialCardProps) {
         await ensureRecentWebAuthn();
         const revealedSecret = await revealCredential(credential.id);
         setSecret(revealedSecret);
+        window.setTimeout(() => setSecret(null), 12_000);
       } catch (caughtError) {
         setError(caughtError instanceof Error ? caughtError.message : "No se pudo revelar la credencial.");
       }

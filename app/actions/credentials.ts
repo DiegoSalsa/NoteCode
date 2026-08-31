@@ -1,9 +1,12 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { decryptString, encryptString } from "@/lib/crypto";
-import { getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
+import { CURRENT_KEY_VERSION, decryptString, encryptString } from "@/lib/crypto";
+import { canManage, getCurrentUser, hasRecentWebAuthn } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
+import { encodeVaultSecret, decodeVaultSecret } from "@/lib/secret-payload";
+import { recordAudit } from "@/lib/audit";
+import { rateLimit } from "@/lib/rate-limit";
 
 type SaveCredentialInput = {
   projectId?: string;
@@ -27,7 +30,8 @@ export async function saveCredential(data: SaveCredentialInput) {
       projectId: data.projectId || null,
       name: data.name,
       username: data.username,
-      secretData: encryptString(data.password),
+      secretData: encryptString(encodeVaultSecret({ password: data.password })),
+      keyVersion: CURRENT_KEY_VERSION,
     },
     select: {
       id: true,
@@ -49,6 +53,10 @@ export async function revealCredential(credentialId: string) {
   if (!(await hasRecentWebAuthn(user.id))) {
     throw new Error("Necesitas confirmar tu identidad para revelar credenciales.");
   }
+  const limited = rateLimit(`reveal:${user.id}`, 10, 60_000);
+  if (!limited.ok) {
+    throw new Error("Demasiados intentos de revelar secretos. Espera un momento.");
+  }
 
   if (!credentialId) {
     throw new Error("credentialId is required.");
@@ -65,8 +73,11 @@ export async function revealCredential(credentialId: string) {
   if (credential.projectId && !await findAccessibleProject(credential.projectId, user.id)) {
     throw new Error("Credential not found.");
   }
+  if (!credential.projectId && !canManage(user)) {
+    throw new Error("Credential not found.");
+  }
 
-  const password = decryptString(credential.secretData);
+  const payload = decodeVaultSecret(decryptString(credential.secretData));
 
   await prisma.auditLog.create({
     data: {
@@ -75,6 +86,13 @@ export async function revealCredential(credentialId: string) {
       credentialId: credential.id,
     },
   });
+  await recordAudit({
+    action: "reveal",
+    entityType: "credential",
+    entityId: credential.id,
+    summary: "Secreto revelado",
+    metadata: { credentialId: credential.id },
+  });
 
-  return password;
+  return payload.password;
 }

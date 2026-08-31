@@ -29,12 +29,13 @@ export async function POST(request: NextRequest) {
         select: {
           userId: true,
           email: true,
+          active: true,
         },
       },
     },
   });
 
-  if (!passkey || (challenge.userId && challenge.userId !== passkey.userId)) {
+  if (!passkey || (challenge.userId && challenge.userId !== passkey.userId) || !passkey.user.active) {
     return NextResponse.json({ error: "No encontramos una huella registrada para este acceso." }, { status: 404 });
   }
 

@@ -4,26 +4,52 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
+export const CURRENT_KEY_VERSION = Number(process.env.ENCRYPTION_KEY_VERSION || "1") || 1;
 
-function getEncryptionKey() {
-  const key = process.env.ENCRYPTION_KEY;
-
-  if (!key) {
-    throw new Error("ENCRYPTION_KEY is required to encrypt and decrypt credentials.");
+function keyFromEnv(value: string | undefined, name: string) {
+  if (!value) {
+    throw new Error(`${name} is required to encrypt and decrypt credentials.`);
   }
 
-  const keyBuffer = Buffer.from(key, "utf8");
-
+  const keyBuffer = Buffer.from(value, "utf8");
   if (keyBuffer.byteLength !== KEY_LENGTH) {
-    throw new Error("ENCRYPTION_KEY must be exactly 32 bytes for AES-256-GCM.");
+    throw new Error(`${name} must be exactly 32 bytes for AES-256-GCM.`);
   }
 
   return keyBuffer;
 }
 
-export function encryptString(text: string) {
+function getEncryptionKey(version = CURRENT_KEY_VERSION) {
+  if (version === CURRENT_KEY_VERSION) {
+    return keyFromEnv(process.env.ENCRYPTION_KEY, "ENCRYPTION_KEY");
+  }
+
+  if (process.env.ENCRYPTION_KEY_PREVIOUS) {
+    return keyFromEnv(process.env.ENCRYPTION_KEY_PREVIOUS, "ENCRYPTION_KEY_PREVIOUS");
+  }
+
+  return keyFromEnv(process.env.ENCRYPTION_KEY, "ENCRYPTION_KEY");
+}
+
+function parseCiphertext(encryptedText: string) {
+  const parts = encryptedText.split(":");
+  if (parts.length === 4 && /^v\d+$/i.test(parts[0])) {
+    return {
+      version: Number.parseInt(parts[0].slice(1), 10),
+      ivHex: parts[1],
+      authTagHex: parts[2],
+      encryptedHex: parts[3],
+    };
+  }
+  if (parts.length === 3) {
+    return { version: CURRENT_KEY_VERSION, ivHex: parts[0], authTagHex: parts[1], encryptedHex: parts[2] };
+  }
+  throw new Error("Encrypted credential payload must use vN:iv:authTag:encryptedText format.");
+}
+
+export function encryptString(text: string, version = CURRENT_KEY_VERSION) {
   const iv = randomBytes(IV_LENGTH);
-  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(), iv, {
+  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(version), iv, {
     authTagLength: AUTH_TAG_LENGTH,
   });
 
@@ -33,29 +59,36 @@ export function encryptString(text: string) {
   ]);
   const authTag = cipher.getAuthTag();
 
-  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
+  return `v${version}:${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
 }
 
 export function decryptString(encryptedText: string) {
-  const [ivHex, authTagHex, encryptedHex] = encryptedText.split(":");
+  const parsed = parseCiphertext(encryptedText);
+  const versions = [parsed.version, CURRENT_KEY_VERSION, 1].filter((value, index, all) => all.indexOf(value) === index);
 
-  if (!ivHex || !authTagHex || !encryptedHex) {
-    throw new Error("Encrypted credential payload must use iv:authTag:encryptedText format.");
+  let lastError: unknown = null;
+  for (const version of versions) {
+    try {
+      const decipher = createDecipheriv(
+        ALGORITHM,
+        getEncryptionKey(version),
+        Buffer.from(parsed.ivHex, "hex"),
+        { authTagLength: AUTH_TAG_LENGTH },
+      );
+      decipher.setAuthTag(Buffer.from(parsed.authTagHex, "hex"));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(parsed.encryptedHex, "hex")),
+        decipher.final(),
+      ]);
+      return decrypted.toString("utf8");
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  const decipher = createDecipheriv(
-    ALGORITHM,
-    getEncryptionKey(),
-    Buffer.from(ivHex, "hex"),
-    { authTagLength: AUTH_TAG_LENGTH },
-  );
+  throw lastError instanceof Error ? lastError : new Error("Unable to decrypt credential payload.");
+}
 
-  decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
-
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(encryptedHex, "hex")),
-    decipher.final(),
-  ]);
-
-  return decrypted.toString("utf8");
+export function inspectCipherVersion(encryptedText: string) {
+  return parseCiphertext(encryptedText).version;
 }

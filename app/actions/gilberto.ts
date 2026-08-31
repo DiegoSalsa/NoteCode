@@ -76,6 +76,9 @@ export async function streamGilberto(messages: UIMessage[], context?: GilbertoTo
     }
 
     const user = await getCurrentUser();
+    if (!user) {
+        throw new Error("No autorizado.");
+    }
     const [memories, approvedActions] = user
         ? await Promise.all([
           prisma.assistantMemory.findMany({

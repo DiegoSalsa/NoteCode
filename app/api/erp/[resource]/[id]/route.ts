@@ -39,6 +39,7 @@ export async function PATCH(
   try {
     let item: { id: string };
     if (resource === "trash") {
+      if (user.role !== "ADMIN") return NextResponse.json({ error: "Solo administración puede restaurar la papelera." }, { status: 403 });
       const [entityType, originalId] = decodeURIComponent(id).split(":");
       if (!entityType || !originalId) return NextResponse.json({ error: "Elemento de papelera inválido." }, { status: 400 });
       switch (entityType) {

@@ -24,9 +24,12 @@ export async function GET(
                     client: { select: { id: true, name: true } },
                     owner: { select: { id: true, name: true } },
                     statusLogs: { orderBy: { createdAt: "desc" } },
-                    requirements: { orderBy: { createdAt: "desc" } },
-                    tasks: { orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }] },
-                    techs: { orderBy: { createdAt: "asc" } },
+                    requirements: { where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+                    tasks: { where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { status: "asc" }, { dueDate: "asc" }] },
+                    techs: { where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+                    decisions: { where: { deletedAt: null }, orderBy: { updatedAt: "desc" } },
+                    risks: { where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }] },
+                    milestones: { where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }] },
                     vaultCredentials: {
                         orderBy: { createdAt: "desc" },
                         select: {
@@ -46,8 +49,9 @@ export async function GET(
                         orderBy: { updatedAt: "desc" },
                     },
                     documents: {
+                        where: { deletedAt: null },
                         orderBy: { updatedAt: "desc" },
-                        select: { id: true, name: true, category: true, size: true, clientVisible: true, updatedAt: true, createdAt: true },
+                        select: { id: true, name: true, category: true, size: true, clientVisible: true, version: true, updatedAt: true, createdAt: true },
                     },
                     invoices: {
                       orderBy: { createdAt: "desc" },
@@ -92,7 +96,7 @@ export async function GET(
 
             if (!project) return null;
 
-            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices, assignments, timeEntries, expenses, tickets, approvals, contracts, quotes } = project;
+            const { statusLogs, requirements, tasks, techs, vaultCredentials, notes, documents, invoices, assignments, timeEntries, expenses, tickets, approvals, contracts, quotes, decisions, risks, milestones } = project;
             const timeline = [
                 ...statusLogs.map((log) => ({
                     id: `status:${log.id}`,
@@ -151,6 +155,9 @@ export async function GET(
                 requirements,
                 tasks,
                 techs,
+                decisions,
+                risks,
+                milestones,
                 credentials: vaultCredentials.map((credential) => ({
                     ...credential,
                     title: credential.name,
@@ -211,6 +218,11 @@ export async function PATCH(
         const clientId = !personal && (body.clientId || body.clientName)
             ? await resolveClientId({ clientId: body.clientId, clientName: body.clientName })
             : undefined;
+        const current = await prisma.project.findFirst({ where: { id }, select: { version: true, status: true } });
+        if (!current) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+        if (body.version !== undefined && current.version !== body.version) {
+            return NextResponse.json({ error: "El registro fue modificado en otra sesión. Recarga e inténtalo de nuevo." }, { status: 409 });
+        }
         const project = await prisma.project.update({
             where: { id },
             data: {
@@ -225,6 +237,13 @@ export async function PATCH(
                 targetDate: body.targetDate === undefined ? undefined : body.targetDate ? new Date(body.targetDate) : null,
                 ownerId: personal ? undefined : body.ownerId === undefined ? undefined : body.ownerId || null,
                 clientId,
+                objective: body.objective,
+                specificObjectives: body.specificObjectives,
+                scope: body.scope,
+                exclusions: body.exclusions,
+                priority: body.priority,
+                tags: Array.isArray(body.tags) ? body.tags : undefined,
+                version: { increment: 1 },
                 statusLogs: body.status && body.status !== existing.status
                     ? { create: { status: body.status, note: body.statusNote || "Actualizado desde la ficha del proyecto" } }
                     : undefined,
@@ -257,7 +276,7 @@ export async function DELETE(
         }
         await prisma.project.update({
             where: { id },
-            data: { deletedAt: new Date() },
+            data: { deletedAt: new Date(), deletedById: user.id },
         });
         invalidateCache(`project:${id}`);
         invalidateCache("projects:");

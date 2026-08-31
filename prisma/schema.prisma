@@ -49,15 +49,25 @@ model Project {
   currency        String       @default("CLP")
   budgetHours     Float        @default(0) @map("budget_hours")
   budgetCost      Float        @default(0) @map("budget_cost")
-  startDate       DateTime?    @map("start_date")
-  targetDate      DateTime?    @map("target_date")
-  ownerId         String?      @map("owner_id")
-  owner           TeamMember?  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  clientId        String?      @map("client_id")
-  client          Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
-  deletedAt       DateTime?    @map("deleted_at")
+  startDate            DateTime?    @map("start_date")
+  targetDate           DateTime?    @map("target_date")
+  ownerId              String?      @map("owner_id")
+  owner                TeamMember?  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  clientId             String?      @map("client_id")
+  client               Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  objective            String?
+  specificObjectives   String?      @map("specific_objectives")
+  scope                String?
+  exclusions           String?
+  priority             String       @default("Media")
+  tags                 String[]     @default([])
+  templateKey          String?      @map("template_key")
+  version              Int          @default(1)
+  sortOrder            Int          @default(0) @map("sort_order")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  deletedAt            DateTime?    @map("deleted_at")
+  deletedById          String?      @map("deleted_by_id")
 
   statusLogs       ProjectStatusLog[]
   requirements     ProjectRequirement[]
@@ -76,6 +86,14 @@ model Project {
   purchaseOrders   PurchaseOrder[]
   quotes           Quote[]
   portalTokens     ClientPortalToken[]
+  decisions        ProjectDecision[]
+  risks            ProjectRisk[]
+  milestones       ProjectMilestone[]
+  relatedFrom      ProjectRelation[] @relation("ProjectRelationFrom")
+  relatedTo        ProjectRelation[] @relation("ProjectRelationTo")
+  members          ProjectMember[]
+  customFields     CustomField[]
+  savedViews       SavedView[]
 
   @@index([clientId])
   @@index([ownerId])
@@ -102,18 +120,24 @@ model ProjectStatusLog {
 }
 
 model ProjectRequirement {
-  id            String   @id @default(uuid())
-  projectId     String   @map("project_id")
-  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id            String    @id @default(uuid())
+  projectId     String    @map("project_id")
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code          String    @default("")
   description   String
-  category      String   @default("Funcional")
-  priority      String   @default("Media")
-  completed     Boolean  @default(false)
-  clientVisible Boolean  @default(false) @map("client_visible")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  category      String    @default("Funcional")
+  priority      String    @default("Media")
+  completed     Boolean   @default(false)
+  clientVisible Boolean   @default(false) @map("client_visible")
+  sortOrder     Int       @default(0) @map("sort_order")
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
 
-  @@index([projectId])
+  @@index([projectId, deletedAt])
+  @@index([projectId, sortOrder])
   @@index([completed])
   @@index([priority])
   @@map("project_requirements")
@@ -129,42 +153,52 @@ model ProjectTask {
   priority      String      @default("Media")
   dueDate       DateTime?   @map("due_date")
   clientVisible Boolean     @default(false) @map("client_visible")
+  sortOrder     Int         @default(0) @map("sort_order")
+  version       Int         @default(1)
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
+  deletedAt     DateTime?   @map("deleted_at")
+  deletedById   String?     @map("deleted_by_id")
   timeEntries   TimeEntry[]
 
-  @@index([projectId])
-  @@index([status])
+  @@index([projectId, deletedAt])
+  @@index([projectId, status, sortOrder])
   @@index([priority])
   @@index([dueDate])
   @@map("project_tasks")
 }
 
 model ProjectTech {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name      String
-  category  String   @default("Frontend")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  category    String    @default("Frontend")
+  sortOrder   Int       @default(0) @map("sort_order")
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  deletedById String?   @map("deleted_by_id")
 
-  @@index([projectId])
+  @@index([projectId, deletedAt])
   @@index([category])
   @@map("project_techs")
 }
 
 model Credential {
-  id         String     @id @default(uuid())
-  projectId  String?    @map("project_id")
-  project    Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name       String
-  username   String
-  secretData String     @map("secret_data")
-  createdAt  DateTime   @default(now()) @map("created_at")
-  updatedAt  DateTime   @updatedAt @map("updated_at")
-  deletedAt  DateTime?  @map("deleted_at")
-  auditLogs  AuditLog[]
+  id          String     @id @default(uuid())
+  projectId   String?    @map("project_id")
+  project     Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  username    String
+  secretData  String     @map("secret_data")
+  keyVersion  Int        @default(1) @map("key_version")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  deletedAt   DateTime?  @map("deleted_at")
+  deletedById String?    @map("deleted_by_id")
+  auditLogs   AuditLog[]
 
   @@index([projectId])
   @@index([updatedAt])
@@ -185,9 +219,11 @@ model Document {
   storagePath   String?   @map("storage_path")
   storageBucket String?   @map("storage_bucket")
   clientVisible Boolean   @default(false) @map("client_visible")
+  version       Int       @default(1)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
   deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
 
   @@index([category])
   @@index([projectId])
@@ -369,18 +405,27 @@ model Note {
   personalOwnerId String?      @map("personal_owner_id")
   personalOwner   UserProfile? @relation("PersonalNoteOwner", fields: [personalOwnerId], references: [userId], onDelete: Cascade)
   title           String
+  slug            String?
   content         String       @default("")
   folder          String       @default("General")
+  pinned          Boolean      @default(false)
+  tags            String[]     @default([])
+  version         Int          @default(1)
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
   deletedAt       DateTime?    @map("deleted_at")
+  deletedById     String?      @map("deleted_by_id")
+  revisions       NoteRevision[]
+  outgoingLinks   NoteLink[]   @relation("NoteLinkSource")
 
   @@index([folder])
   @@index([projectId])
   @@index([visibility, personalOwnerId])
+  @@index([slug])
   @@index([updatedAt])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([pinned])
   @@map("notes")
 }
 
@@ -917,18 +962,21 @@ model AssistantRoutine {
 }
 
 model AuditEvent {
-  id          String   @id @default(uuid())
-  actorUserId String?  @map("actor_user_id")
-  action      String
-  entityType  String   @map("entity_type")
-  entityId    String   @map("entity_id")
-  summary     String?
-  metadata    Json     @default("{}")
-  ipAddress   String?  @map("ip_address")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  actorUserId   String?  @map("actor_user_id")
+  actorType     String   @default("user") @map("actor_type")
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String   @map("entity_id")
+  summary       String?
+  metadata      Json     @default("{}")
+  ipAddress     String?  @map("ip_address")
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([entityType, entityId])
   @@index([actorUserId, createdAt])
+  @@index([correlationId])
   @@index([createdAt])
   @@map("audit_events")
 }
@@ -1184,4 +1232,232 @@ model F29Period {
   @@unique([profileId, period])
   @@index([period, status])
   @@map("f29_periods")
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  key          String
+  method       String
+  path         String
+  statusCode   Int      @default(0) @map("status_code")
+  responseBody Json     @default("{}") @map("response_body")
+  pending      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+
+  @@unique([userId, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model EncryptionKeyVersion {
+  version   Int       @id
+  label     String
+  active    Boolean   @default(false)
+  createdAt DateTime  @default(now()) @map("created_at")
+  retiredAt DateTime? @map("retired_at")
+
+  @@map("encryption_key_versions")
+}
+
+model NoteRevision {
+  id        String   @id @default(uuid())
+  noteId    String   @map("note_id")
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  title     String
+  content   String
+  version   Int
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([noteId, version])
+  @@map("note_revisions")
+}
+
+model NoteLink {
+  id           String   @id @default(uuid())
+  sourceNoteId String   @map("source_note_id")
+  sourceNote   Note     @relation("NoteLinkSource", fields: [sourceNoteId], references: [id], onDelete: Cascade)
+  targetType   String   @map("target_type")
+  targetId     String   @map("target_id")
+  label        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([sourceNoteId, targetType, targetId])
+  @@index([targetType, targetId])
+  @@map("note_links")
+}
+
+model ProjectDecision {
+  id            String    @id @default(uuid())
+  projectId     String    @map("project_id")
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  context       String    @default("")
+  decision      String    @default("")
+  alternatives  String    @default("")
+  consequences  String    @default("")
+  status        String    @default("Propuesta")
+  ownerName     String?   @map("owner_name")
+  decidedAt     DateTime? @map("decided_at")
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedById   String?   @map("deleted_by_id")
+
+  @@index([projectId, deletedAt])
+  @@index([status])
+  @@map("project_decisions")
+}
+
+model ProjectRisk {
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String    @default("")
+  probability String    @default("Media")
+  impact      String    @default("Media")
+  status      String    @default("Abierto")
+  mitigation  String    @default("")
+  ownerName   String?   @map("owner_name")
+  sortOrder   Int       @default(0) @map("sort_order")
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  deletedById String?   @map("deleted_by_id")
+
+  @@index([projectId, deletedAt])
+  @@map("project_risks")
+}
+
+model ProjectMilestone {
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String    @default("")
+  dueDate     DateTime? @map("due_date")
+  status      String    @default("Pendiente")
+  sortOrder   Int       @default(0) @map("sort_order")
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  deletedById String?   @map("deleted_by_id")
+
+  @@index([projectId, deletedAt])
+  @@index([dueDate])
+  @@map("project_milestones")
+}
+
+model ProjectRelation {
+  id         String   @id @default(uuid())
+  fromId     String   @map("from_id")
+  from       Project  @relation("ProjectRelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId       String   @map("to_id")
+  to         Project  @relation("ProjectRelationTo", fields: [toId], references: [id], onDelete: Cascade)
+  type       String   @default("relacionado")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([fromId, toId, type])
+  @@index([toId])
+  @@map("project_relations")
+}
+
+model ProjectMember {
+  id         String    @id @default(uuid())
+  projectId  String    @map("project_id")
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId     String    @map("user_id")
+  role       String    @default("lector")
+  invitedAt  DateTime  @default(now()) @map("invited_at")
+  acceptedAt DateTime? @map("accepted_at")
+  expiresAt  DateTime? @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  @@unique([projectId, userId])
+  @@index([userId, revokedAt])
+  @@map("project_members")
+}
+
+model CustomField {
+  id        String             @id @default(uuid())
+  projectId String             @map("project_id")
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  key       String
+  type      String
+  options   Json               @default("[]")
+  sortOrder Int                @default(0) @map("sort_order")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+  values    CustomFieldValue[]
+
+  @@unique([projectId, key])
+  @@index([projectId, sortOrder])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id         String      @id @default(uuid())
+  fieldId    String      @map("field_id")
+  field      CustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  value      Json        @default("null")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  @@unique([fieldId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("custom_field_values")
+}
+
+model SavedView {
+  id         String   @id @default(uuid())
+  projectId  String?  @map("project_id")
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId     String   @map("user_id")
+  name       String
+  entity     String
+  kind       String   @default("lista")
+  filters    Json     @default("{}")
+  sorts      Json     @default("[]")
+  groupBy    String?  @map("group_by")
+  isDefault  Boolean  @default(false) @map("is_default")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, entity])
+  @@index([projectId])
+  @@map("saved_views")
+}
+
+model ViewPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  scope     String
+  value     Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, scope])
+  @@map("view_preferences")
+}
+
+model WorkspaceBackup {
+  id          String    @id @default(uuid())
+  createdById String    @map("created_by_id")
+  kind        String
+  status      String    @default("pendiente")
+  checksum    String?
+  storagePath String?   @map("storage_path")
+  notes       String?
+  validatedAt DateTime? @map("validated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("workspace_backups")
 }

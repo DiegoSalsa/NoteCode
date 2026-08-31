@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
+import { recordAudit } from "@/lib/audit";
+import { jsonWithIdempotency } from "@/lib/idempotency-server";
+import { logEvent } from "@/lib/log";
 
 const taskSchema = z.object({
   title: z.string().trim().min(1).max(180),
@@ -30,8 +33,8 @@ export async function GET(
     const { id } = await params;
     if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const tasks = await prisma.projectTask.findMany({
-      where: { projectId: id },
-      orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+      where: { projectId: id, deletedAt: null },
+      orderBy: [{ sortOrder: "asc" }, { status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
     });
 
     return NextResponse.json(tasks);
@@ -51,25 +54,31 @@ export async function POST(
     if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
     const body = taskSchema.safeParse(await request.json());
     if (!body.success) {
-      return NextResponse.json({ error: "Invalid task payload" }, { status: 400 });
+      return NextResponse.json({ error: "La tarea no es válida." }, { status: 400 });
     }
 
-    const task = await prisma.projectTask.create({
-      data: {
-        projectId: id,
-        title: body.data.title,
-        description: body.data.description || null,
-        status: body.data.status,
-        priority: body.data.priority,
-        dueDate: parseDueDate(body.data.dueDate),
-        clientVisible: body.data.clientVisible,
-      },
-    });
+    return jsonWithIdempotency(request, user.id, async () => {
+      const count = await prisma.projectTask.count({ where: { projectId: id } });
+      const task = await prisma.projectTask.create({
+        data: {
+          projectId: id,
+          title: body.data.title,
+          description: body.data.description || null,
+          status: body.data.status,
+          priority: body.data.priority,
+          dueDate: parseDueDate(body.data.dueDate),
+          clientVisible: body.data.clientVisible,
+          sortOrder: count,
+        },
+      });
 
-    invalidateCache(`project:${id}`);
-    invalidateCache("erp:");
-    return NextResponse.json(task, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
+      invalidateCache(`project:${id}`);
+      invalidateCache("erp:");
+      await recordAudit({ action: "create", entityType: "task", entityId: task.id, summary: `Tarea creada: ${task.title}` });
+      return { status: 201, body: task };
+    });
+  } catch (error) {
+    logEvent("error", "tasks.create", { error: error instanceof Error ? error.message : "unknown" });
+    return NextResponse.json({ error: "No se pudo crear la tarea." }, { status: 500 });
   }
 }

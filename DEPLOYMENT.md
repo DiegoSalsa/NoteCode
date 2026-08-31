@@ -64,9 +64,30 @@ prisma/migrations-manual/20260723_push_notifications.sql
 prisma/migrations-manual/20260728_persistent_client_portal.sql
 prisma/migrations-manual/20260728_erp_connection_audit.sql
 prisma/migrations-manual/20260824_personal_notes_projects.sql
+prisma/migrations-manual/20260831_workspace_integrity.sql
 ```
 
 The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.
+
+The 2026-08-31 script is additive: idempotency, logical delete, requirement codes, note history, ADRs and encryption key versions. It does not drop user rows.
+
+## Encryption key rotation
+
+Keep `ENCRYPTION_KEY` as the active 32-byte key. To rotate:
+
+1. Copy the current key to `ENCRYPTION_KEY_PREVIOUS`.
+2. Put the new 32-byte key in `ENCRYPTION_KEY`.
+3. Optionally set `ENCRYPTION_KEY_VERSION` to the next integer.
+4. New secrets are stored as `vN:iv:tag:ciphertext`. Legacy payloads still decrypt.
+
+Never commit keys. Never log decrypted payloads.
+
+## Backup policy
+
+- Proposed RPO: 24 hours. Proposed RTO: 4 hours.
+- Application export: `GET /api/export` (JSON, secrets excluded by default).
+- Vault export: `GET /api/export?includeSecrets=1` after WebAuthn reauth.
+- A backup is not valid until restored in an isolated environment.
 
 ## Daily automations
 

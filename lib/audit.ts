@@ -10,6 +10,8 @@ export async function recordAudit(input: {
   entityId: string;
   summary?: string;
   metadata?: Record<string, unknown>;
+  actorType?: string;
+  correlationId?: string | null;
 }) {
   const [user, requestHeaders] = await Promise.all([getCurrentUser(), headers()]);
   const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -17,12 +19,14 @@ export async function recordAudit(input: {
   await prisma.auditEvent.create({
     data: {
       actorUserId: user?.id ?? null,
+      actorType: input.actorType ?? "user",
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,
       summary: input.summary ?? null,
       metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
       ipAddress: forwardedFor ?? requestHeaders.get("x-real-ip"),
+      correlationId: input.correlationId ?? requestHeaders.get("x-correlation-id"),
     },
   });
 }

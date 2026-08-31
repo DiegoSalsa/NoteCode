@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
+import { jsonWithIdempotency } from "@/lib/idempotency-server";
+import { recordAudit } from "@/lib/audit";
 
 export async function GET(
     _request: NextRequest,
@@ -14,8 +16,8 @@ export async function GET(
         const { id } = await params;
         if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
         const items = await prisma.projectTech.findMany({
-            where: { projectId: id },
-            orderBy: { createdAt: "asc" },
+            where: { projectId: id, deletedAt: null },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         });
         return NextResponse.json(items);
     } catch {
@@ -33,15 +35,23 @@ export async function POST(
         const { id } = await params;
         if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
         const body = await request.json();
-        const item = await prisma.projectTech.create({
-            data: {
-                projectId: id,
-                name: body.name,
-                category: body.category || "Frontend",
-            },
+        if (!body.name || typeof body.name !== "string") {
+            return NextResponse.json({ error: "El nombre de la tecnología es obligatorio." }, { status: 400 });
+        }
+        return jsonWithIdempotency(request, user.id, async () => {
+            const count = await prisma.projectTech.count({ where: { projectId: id } });
+            const item = await prisma.projectTech.create({
+                data: {
+                    projectId: id,
+                    name: String(body.name).trim(),
+                    category: body.category || "Frontend",
+                    sortOrder: count,
+                },
+            });
+            invalidateCache(`project:${id}`);
+            await recordAudit({ action: "create", entityType: "tech", entityId: item.id, summary: `Tecnología agregada: ${item.name}` });
+            return { status: 201, body: item };
         });
-        invalidateCache(`project:${id}`);
-        return NextResponse.json(item, { status: 201 });
     } catch {
         return NextResponse.json({ error: "Failed" }, { status: 500 });
     }

@@ -187,6 +187,7 @@ export async function verifySessionToken(token: string | undefined): Promise<Aut
         displayName: true,
         age: true,
         passwordHash: true,
+        passwordChangedAt: true,
         role: true,
         active: true,
       },
@@ -194,6 +195,9 @@ export async function verifySessionToken(token: string | undefined): Promise<Aut
 
     if (!profile || !profile.active) {
       authProfileCache.set(payload.userId, { expiresAt: Date.now() + AUTH_PROFILE_CACHE_MS, user: null });
+      return null;
+    }
+    if (profile.passwordChangedAt && profile.passwordChangedAt.getTime() > payload.expiresAt - SESSION_MAX_AGE_SECONDS * 1000) {
       return null;
     }
 

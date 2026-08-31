@@ -43,7 +43,11 @@ async function getBaseUrl() {
   const host = headerStore.get("x-forwarded-host") || headerStore.get("host");
   const proto = headerStore.get("x-forwarded-proto") || "http";
 
-  return process.env.APP_URL || (host ? `${proto}://${host}` : "http://localhost:3000");
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("APP_URL is required in production.");
+  }
+  return host ? `${proto}://${host}` : "http://localhost:3000";
 }
 
 async function createAuthToken(userId: string, purpose: string) {

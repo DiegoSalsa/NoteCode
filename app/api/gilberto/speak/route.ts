@@ -1,3 +1,6 @@
+import { getCurrentUser } from "@/lib/auth";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
+
 export const runtime = "nodejs";
 
 const DEFAULT_VOICE = "aura-2-estrella-es";
@@ -16,6 +19,10 @@ const ALLOWED_VOICES = new Set([
 ]);
 
 export async function POST(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ error: "No autorizado" }, { status: 401 });
+  const limited = rateLimit(clientKey({ headers: req.headers }, `speak:${user.id}`), 30, 60_000);
+  if (!limited.ok) return Response.json({ error: "Demasiadas síntesis de voz." }, { status: 429 });
   const apiKey = process.env.DEEPGRAM_API_KEY;
 
   if (!apiKey) {

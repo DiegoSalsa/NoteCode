@@ -3,6 +3,16 @@ import { prisma } from "@/lib/prisma";
 export const COMPANY_VISIBILITY = "COMPANY";
 export const PERSONAL_VISIBILITY = "PERSONAL";
 
+/**
+ * Política de acceso (decisión de los propietarios, 2026-08-31):
+ * NoteCode lo operan los dos dueños de la empresa. Cualquier usuario
+ * autenticado y activo puede ver y trabajar los proyectos COMPANY.
+ * Los proyectos PERSONAL siguen aislados a su personalOwnerId.
+ * La tabla project_members existe por si más adelante hay colaboradores
+ * externos; no se usa como ACL mientras el equipo sea solo los dueños.
+ */
+export const COMPANY_PROJECTS_SHARED_WITH_STAFF = true;
+
 export type WorkspaceScope = "company" | "personal";
 
 export function workspaceScope(value: string | null | undefined): WorkspaceScope {

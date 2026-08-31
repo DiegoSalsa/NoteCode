@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
+import { canManage, getCurrentUser } from "@/lib/auth";
 
 export async function PATCH(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await getCurrentUser();
+        if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+        if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para modificar clientes." }, { status: 403 });
         const { id } = await params;
         const body = await request.json();
         const client = await prisma.client.update({
@@ -32,6 +36,9 @@ export async function DELETE(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await getCurrentUser();
+        if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+        if (!canManage(user)) return NextResponse.json({ error: "Sin permisos para eliminar clientes." }, { status: 403 });
         const { id } = await params;
         await prisma.client.update({ where: { id }, data: { deletedAt: new Date() } });
         invalidateCache("projects:");

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
 import { invalidateCache } from "@/lib/server-cache";
-import { getCurrentUser } from "@/lib/auth";
+import { canManage, getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
 
 const MASKED_SECRET = "************";
@@ -19,6 +19,9 @@ export async function PATCH(
     const current = await prisma.credential.findFirst({ where: { id, deletedAt: null }, select: { projectId: true } });
     if (!current) return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
     if (current.projectId && !await findAccessibleProject(current.projectId, user.id)) {
+      return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    }
+    if (!current.projectId && !canManage(user)) {
       return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
     }
     const data: {
@@ -65,6 +68,9 @@ export async function DELETE(
     const current = await prisma.credential.findFirst({ where: { id, deletedAt: null }, select: { projectId: true } });
     if (!current) return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
     if (current.projectId && !await findAccessibleProject(current.projectId, user.id)) {
+      return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
+    }
+    if (!current.projectId && !canManage(user)) {
       return NextResponse.json({ error: "Credencial no encontrada" }, { status: 404 });
     }
     const credential = await prisma.credential.update({

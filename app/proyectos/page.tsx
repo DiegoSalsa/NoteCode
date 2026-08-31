@@ -82,7 +82,8 @@ export default function ProyectosPage() {
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Project | null>(null);
-    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "" });
+    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
+    const [createKey, setCreateKey] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
 
@@ -128,13 +129,14 @@ export default function ProyectosPage() {
 
     function openCreate() {
         setEditing(null);
-        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "" });
+        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
+        setCreateKey(crypto.randomUUID());
         setModalOpen(true);
     }
 
     function openEdit(p: Project) {
         setEditing(p);
-        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId || "", clientName: p.client?.name || "", agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "" });
+        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId || "", clientName: p.client?.name || "", agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "", template: "" });
         setModalOpen(true);
     }
 
@@ -152,7 +154,7 @@ export default function ProyectosPage() {
             } else {
                 const response = await fetch("/api/projects", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Content-Type": "application/json", "Idempotency-Key": createKey || crypto.randomUUID() },
                     body: JSON.stringify({ ...form, scope, agreedAmount: Number(form.agreedAmount) || 0, budgetHours: Number(form.budgetHours) || 0, budgetCost: Number(form.budgetCost) || 0 }),
                 });
                 if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || "No se pudo crear el proyecto.");
@@ -203,6 +205,10 @@ export default function ProyectosPage() {
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">Proyectos</h1>
                         <p className="text-[13px] text-neutral-500 mt-1">{total} proyectos {scope === "personal" ? "personales" : "de empresa"}</p>
                     </div>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                        <a href="/api/export" className="inline-flex items-center justify-center rounded-md border border-white/10 px-4 py-2 text-[13px] font-medium text-neutral-300">
+                            Exportar JSON
+                        </a>
                     <button
                         onClick={openCreate}
                         className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 transition-colors hover:bg-white sm:w-auto"
@@ -210,6 +216,7 @@ export default function ProyectosPage() {
                         <Plus size={15} strokeWidth={2} />
                         {scope === "personal" ? "Nuevo Proyecto Personal" : "Nuevo Proyecto"}
                     </button>
+                    </div>
                 </div>
 
                 <div className="inline-flex rounded-lg border border-white/10 bg-neutral-900 p-1" role="tablist" aria-label="Tipo de proyectos">
@@ -391,6 +398,25 @@ export default function ProyectosPage() {
                                     <label className="text-[13px] font-medium text-neutral-300">Objetivo<input type="date" value={form.targetDate} onChange={(e) => setForm({ ...form, targetDate: e.target.value })} className="mt-1.5 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[13px] text-neutral-100" /></label>
                                 </div>
                             </div>
+                            {!editing && (
+                            <div>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Plantilla</label>
+                                <select
+                                    value={form.template}
+                                    disabled={saving}
+                                    onChange={(e) => setForm({ ...form, template: e.target.value })}
+                                    className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100"
+                                >
+                                    <option value="">Sin plantilla (proyecto en blanco)</option>
+                                    <option value="software">Proyecto de software</option>
+                                    <option value="tesis">Proyecto de tesis</option>
+                                    <option value="freelance">Trabajo freelance</option>
+                                    <option value="personal">Gestión personal</option>
+                                    <option value="lanzamiento">Lanzamiento de producto</option>
+                                    <option value="investigacion">Investigación</option>
+                                </select>
+                            </div>
+                            )}
                             <div>
                                 <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Estado</label>
                                 <select

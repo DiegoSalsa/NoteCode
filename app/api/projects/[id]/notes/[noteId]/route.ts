@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
+import { assertVersion, ConflictError, nextVersion } from "@/lib/concurrency";
+import { slugFromTitle, syncNoteLinks } from "@/lib/note-links";
+import { recordAudit } from "@/lib/audit";
 
 export async function PATCH(
     request: NextRequest,
@@ -18,21 +21,32 @@ export async function PATCH(
         if (!title) return NextResponse.json({ error: "El título es obligatorio" }, { status: 400 });
         const current = await prisma.note.findFirst({
             where: { id: noteId, projectId: id, deletedAt: null },
-            select: { id: true },
         });
         if (!current) return NextResponse.json({ error: "Nota no encontrada" }, { status: 404 });
+        assertVersion(current.version, body.version);
+        const content = typeof body.content === "string" ? body.content : "";
+        await prisma.noteRevision.create({
+            data: { noteId, title: current.title, content: current.content, version: current.version, createdBy: user.id },
+        });
         const item = await prisma.note.update({
             where: { id: noteId },
             data: {
                 title,
-                content: typeof body.content === "string" ? body.content : "",
+                content,
+                slug: current.slug || slugFromTitle(title, noteId),
+                pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+                tags: Array.isArray(body.tags) ? body.tags : undefined,
+                version: nextVersion(current.version),
             },
         });
+        await syncNoteLinks(noteId, content);
         invalidateCache(`project:${id}`);
         invalidateCache("notes");
+        await recordAudit({ action: "update", entityType: "note", entityId: noteId, summary: `Nota actualizada: ${title}` });
         return NextResponse.json(item);
-    } catch {
-        return NextResponse.json({ error: "Failed" }, { status: 500 });
+    } catch (error) {
+        if (error instanceof ConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+        return NextResponse.json({ error: "No se pudo actualizar la nota." }, { status: 500 });
     }
 }
 
@@ -47,7 +61,7 @@ export async function DELETE(
         if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
         const result = await prisma.note.updateMany({
             where: { id: noteId, projectId: id },
-            data: { deletedAt: new Date() },
+            data: { deletedAt: new Date(), deletedById: user.id },
         });
         if (result.count === 0) return NextResponse.json({ error: "Nota no encontrada" }, { status: 404 });
         invalidateCache(`project:${id}`);

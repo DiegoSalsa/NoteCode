@@ -68,19 +68,27 @@ export async function PATCH(
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   const { id } = await params;
-  const body = await request.json() as { clientVisible?: boolean };
+  const body = await request.json() as { clientVisible?: boolean; name?: string; category?: string; version?: number };
   const current = await prisma.document.findFirst({
     where: { id, deletedAt: null },
-    select: { project: { select: { visibility: true, personalOwnerId: true } } },
+    select: { version: true, project: { select: { visibility: true, personalOwnerId: true } } },
   });
   if (!current) return NextResponse.json({ error: "Document not found" }, { status: 404 });
   const personal = current.project?.visibility === PERSONAL_VISIBILITY;
   if (personal && current.project?.personalOwnerId !== user.id) return NextResponse.json({ error: "Document not found" }, { status: 404 });
-  if (!personal && !canManage(user)) return NextResponse.json({ error: "Sin permisos para publicar documentos." }, { status: 403 });
+  if (body.clientVisible !== undefined && !personal && !canManage(user)) return NextResponse.json({ error: "Sin permisos para publicar documentos." }, { status: 403 });
+  if (body.version !== undefined && current.version !== body.version) {
+    return NextResponse.json({ error: "El documento fue modificado en otra sesión." }, { status: 409 });
+  }
   const document = await prisma.document.update({
     where: { id },
-    data: { clientVisible: personal ? false : body.clientVisible },
-    select: { id: true, projectId: true, clientVisible: true },
+    data: {
+      clientVisible: personal ? false : body.clientVisible,
+      name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : undefined,
+      category: typeof body.category === "string" && body.category.trim() ? body.category.trim() : undefined,
+      version: { increment: 1 },
+    },
+    select: { id: true, projectId: true, clientVisible: true, name: true, category: true, version: true },
   });
   invalidateCache("documents");
   invalidateCache("erp:");

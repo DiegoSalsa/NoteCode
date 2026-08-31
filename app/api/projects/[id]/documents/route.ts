@@ -3,10 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { uploadDocumentFile } from "@/lib/storage";
 import { documentFileName } from "@/lib/document-files";
-import { getCurrentUser } from "@/lib/auth";
-import { findAccessibleProject } from "@/lib/personal-workspace";
+import { canManage, getCurrentUser } from "@/lib/auth";
+import { findAccessibleProject, isPersonalProject } from "@/lib/personal-workspace";
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
 
 export async function POST(
   request: NextRequest,
@@ -27,7 +40,8 @@ export async function POST(
     const file = formData.get("file");
     const category = String(formData.get("category") || "General").trim() || "General";
     const customName = String(formData.get("name") || "").trim();
-    const clientVisible = String(formData.get("clientVisible") || "") === "true";
+    const wantsClientVisible = String(formData.get("clientVisible") || "") === "true";
+    const clientVisible = !isPersonalProject(project) && canManage(user) && wantsClientVisible;
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -35,6 +49,10 @@ export async function POST(
 
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json({ error: "El documento supera el máximo de 12 MB." }, { status: 413 });
+    }
+    const mimeType = file.type || "application/octet-stream";
+    if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+      return NextResponse.json({ error: "Tipo de archivo no permitido." }, { status: 415 });
     }
 
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -49,7 +67,7 @@ export async function POST(
       data: {
         name,
         category,
-        mimeType: file.type || "application/octet-stream",
+        mimeType,
         size: file.size,
         projectId: id,
         fileData: storedFile ? null : bytes,

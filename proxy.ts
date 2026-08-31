@@ -57,7 +57,12 @@ async function hasValidSession(request: NextRequest) {
   if (!encodedPayload || !signature) return false;
 
   const expectedSignature = await sign(encodedPayload);
-  if (!expectedSignature || expectedSignature !== signature) return false;
+  if (!expectedSignature || expectedSignature.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < expectedSignature.length; index += 1) {
+    mismatch |= expectedSignature.charCodeAt(index) ^ signature.charCodeAt(index);
+  }
+  if (mismatch !== 0) return false;
 
   try {
     const payload = JSON.parse(base64UrlToText(encodedPayload)) as { expiresAt?: number };
@@ -73,6 +78,10 @@ export async function proxy(request: NextRequest) {
   const isPublicPath = PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
   const isAuthEntry = pathname === "/" || pathname === "/establecer-clave";
   const isApiPath = pathname.startsWith("/api");
+  const origin = request.headers.get("origin");
+  if (isApiPath && origin && !["GET", "HEAD", "OPTIONS"].includes(request.method) && origin !== request.nextUrl.origin) {
+    return NextResponse.json({ error: "Origen no permitido." }, { status: 403 });
+  }
 
   if (isAuthEntry && hasSession) {
     return NextResponse.redirect(new URL("/dashboard", request.url));

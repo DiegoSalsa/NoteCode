@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/server-cache";
 import { getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject } from "@/lib/personal-workspace";
+import { recordAudit } from "@/lib/audit";
+import { assertVersion, ConflictError, nextVersion } from "@/lib/concurrency";
+import { logEvent } from "@/lib/log";
 
 const taskPatchSchema = z.object({
   title: z.string().trim().min(1).max(180).optional(),
@@ -12,6 +15,8 @@ const taskPatchSchema = z.object({
   priority: z.enum(["Baja", "Media", "Alta"]).optional(),
   dueDate: z.string().trim().optional().nullable(),
   clientVisible: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  version: z.number().int().optional(),
 });
 
 function parseDueDate(value: string | null | undefined) {
@@ -36,10 +41,10 @@ export async function PATCH(
     }
 
     const current = await prisma.projectTask.findFirst({
-      where: { id: taskId, projectId: id },
-      select: { id: true },
+      where: { id: taskId, projectId: id, deletedAt: null },
     });
-    if (!current) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    if (!current) return NextResponse.json({ error: "Tarea no encontrada" }, { status: 404 });
+    assertVersion(current.version, body.data.version);
 
     const task = await prisma.projectTask.update({
       where: { id: taskId },
@@ -50,14 +55,19 @@ export async function PATCH(
         priority: body.data.priority,
         dueDate: parseDueDate(body.data.dueDate),
         clientVisible: body.data.clientVisible,
+        sortOrder: body.data.sortOrder,
+        version: nextVersion(current.version),
       },
     });
 
     invalidateCache(`project:${id}`);
     invalidateCache("erp:");
+    await recordAudit({ action: "update", entityType: "task", entityId: task.id, summary: `Tarea actualizada: ${task.title}` });
     return NextResponse.json(task);
-  } catch {
-    return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
+  } catch (error) {
+    if (error instanceof ConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+    logEvent("error", "tasks.update", { error: error instanceof Error ? error.message : "unknown" });
+    return NextResponse.json({ error: "No se pudo actualizar la tarea." }, { status: 500 });
   }
 }
 
@@ -70,15 +80,18 @@ export async function DELETE(
     if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     const { id, taskId } = await params;
     if (!await findAccessibleProject(id, user.id)) return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
-    const result = await prisma.projectTask.deleteMany({
-      where: { id: taskId, projectId: id },
+    const result = await prisma.projectTask.updateMany({
+      where: { id: taskId, projectId: id, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: user.id },
     });
-    if (result.count === 0) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    if (result.count === 0) return NextResponse.json({ error: "Tarea no encontrada" }, { status: 404 });
 
     invalidateCache(`project:${id}`);
     invalidateCache("erp:");
-    return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete task" }, { status: 500 });
+    await recordAudit({ action: "delete", entityType: "task", entityId: taskId, summary: "Tarea enviada a papelera" });
+    return NextResponse.json({ success: true, recoverable: true });
+  } catch (error) {
+    logEvent("error", "tasks.delete", { error: error instanceof Error ? error.message : "unknown" });
+    return NextResponse.json({ error: "No se pudo eliminar la tarea." }, { status: 500 });
   }
 }

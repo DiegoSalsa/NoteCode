@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/server-cache";
-import { getCurrentUser } from "@/lib/auth";
+import { canManage, getCurrentUser } from "@/lib/auth";
 import { COMPANY_VISIBILITY, PERSONAL_VISIBILITY } from "@/lib/personal-workspace";
 
 const MASKED_SECRET = "************";
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const accessWhere = {
       deletedAt: null,
       OR: [
-        { projectId: null },
+        ...(canManage(user) ? [{ projectId: null as string | null }] : []),
         { project: { visibility: COMPANY_VISIBILITY } },
         { project: { visibility: PERSONAL_VISIBILITY, personalOwnerId: user.id } },
       ],

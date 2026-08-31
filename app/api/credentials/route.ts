@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptString } from "@/lib/crypto";
 import { cached, invalidateCache } from "@/lib/server-cache";
-import { getCurrentUser } from "@/lib/auth";
+import { canManage, getCurrentUser } from "@/lib/auth";
 import { findAccessibleProject, COMPANY_VISIBILITY, PERSONAL_VISIBILITY } from "@/lib/personal-workspace";
 
 const MASKED_SECRET = "************";
@@ -15,7 +15,7 @@ export async function GET() {
       where: {
         deletedAt: null,
         OR: [
-          { projectId: null },
+          ...(canManage(user) ? [{ projectId: null as string | null }] : []),
           { project: { visibility: COMPANY_VISIBILITY } },
           { project: { visibility: PERSONAL_VISIBILITY, personalOwnerId: user.id } },
         ],
@@ -68,6 +68,9 @@ export async function POST(request: NextRequest) {
 
     if (body.projectId && !await findAccessibleProject(body.projectId, user.id)) {
       return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 });
+    }
+    if (!body.projectId && !canManage(user)) {
+      return NextResponse.json({ error: "Sin permisos para crear credenciales de empresa." }, { status: 403 });
     }
     const credential = await prisma.credential.create({
       data: {

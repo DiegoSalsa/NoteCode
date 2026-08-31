@@ -176,7 +176,7 @@ export async function GET(
           _count: client._count,
           portals: client.portalTokens.map((token) => {
             let rawToken: string | null = null;
-            if (token.tokenCiphertext) {
+            if (canManage(user) && token.tokenCiphertext) {
               try {
                 rawToken = decryptString(token.tokenCiphertext);
               } catch {

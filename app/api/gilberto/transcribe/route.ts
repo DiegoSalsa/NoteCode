@@ -1,3 +1,6 @@
+import { getCurrentUser } from "@/lib/auth";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
+
 export const runtime = "nodejs";
 
 type DeepgramTranscription = {
@@ -12,6 +15,10 @@ type DeepgramTranscription = {
 };
 
 export async function POST(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ error: "No autorizado" }, { status: 401 });
+  const limited = rateLimit(clientKey({ headers: req.headers }, `transcribe:${user.id}`), 20, 60_000);
+  if (!limited.ok) return Response.json({ error: "Demasiadas transcripciones." }, { status: 429 });
   const apiKey = process.env.DEEPGRAM_API_KEY;
 
   if (!apiKey) {
@@ -21,6 +28,9 @@ export async function POST(req: Request) {
   const audio = await req.arrayBuffer();
   if (!audio.byteLength) {
     return Response.json({ error: "No se recibio audio." }, { status: 400 });
+  }
+  if (audio.byteLength > 8 * 1024 * 1024) {
+    return Response.json({ error: "El audio supera el máximo de 8 MB." }, { status: 413 });
   }
 
   const contentType = req.headers.get("content-type") || "audio/webm";

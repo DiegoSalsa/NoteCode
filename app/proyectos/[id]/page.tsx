@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, use, useRef } from "react";
 import Link from "next/link";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson, writeCachedJson } from "@/lib/client-cache";
 import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
 import ProjectCommercial, { type ProjectInvoice, type ProjectQuote } from "@/components/ProjectCommercial";
+import MarkdownPreview from "@/components/MarkdownPreview";
+import { newIdempotencyKey } from "@/lib/http";
 import {
     ArrowLeft,
     CalendarDays,
@@ -35,6 +37,14 @@ type ProjectData = {
     status: string;
     agreedAmount: number;
     visibility: string;
+    objective: string | null;
+    specificObjectives: string | null;
+    scope: string | null;
+    exclusions: string | null;
+    priority: string;
+    version: number;
+    startDate: string | null;
+    targetDate: string | null;
     client: { id: string; name: string } | null;
     createdAt: string;
     updatedAt: string;
@@ -49,11 +59,13 @@ type StatusLog = {
 
 type Requirement = {
     id: string;
+    code: string;
     description: string;
     category: string;
     priority: string;
     completed: boolean;
     clientVisible: boolean;
+    version: number;
     createdAt: string;
 };
 
@@ -67,9 +79,22 @@ type ProjectTask = {
     createdAt: string;
     updatedAt: string;
     clientVisible: boolean;
+    version: number;
 };
 
-type Tech = { id: string; name: string; category: string };
+type Tech = { id: string; name: string; category: string; version: number };
+
+type Decision = {
+    id: string;
+    title: string;
+    context: string;
+    decision: string;
+    alternatives: string;
+    consequences: string;
+    status: string;
+    ownerName: string | null;
+    decidedAt: string | null;
+};
 
 type Credential = {
     id: string;
@@ -96,6 +121,7 @@ type ProjectDocument = {
     createdAt: string;
     updatedAt: string;
     clientVisible: boolean;
+    version: number;
 };
 
 type TimelineItem = {
@@ -124,6 +150,7 @@ type ProjectDetailPayload = {
     requirements: Requirement[];
     tasks: ProjectTask[];
     techs: Tech[];
+    decisions?: Decision[];
     credentials: Credential[];
     notes: ProjectNote[];
     documents: ProjectDocument[];
@@ -195,6 +222,21 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const [operations, setOperations] = useState<ProjectOperations | null>(() => cached?.operations ?? null);
     const [loading, setLoading] = useState(!cached);
     const [actionError, setActionError] = useState("");
+    const [notice, setNotice] = useState("");
+    const [savingAction, setSavingAction] = useState<string | null>(null);
+    const [query, setQuery] = useState("");
+    const [priorityFilter, setPriorityFilter] = useState("all");
+    const [taskView, setTaskView] = useState<"kanban" | "lista" | "calendario">("kanban");
+    const [editingTask, setEditingTask] = useState<ProjectTask | null>(null);
+    const [editingReq, setEditingReq] = useState<Requirement | null>(null);
+    const [editingTech, setEditingTech] = useState<Tech | null>(null);
+    const [editingProject, setEditingProject] = useState(false);
+    const [projectForm, setProjectForm] = useState({ description: "", objective: "", specificObjectives: "", scope: "", exclusions: "", priority: "Media" });
+    const [decisions, setDecisions] = useState<Decision[]>(() => asArray<Decision>(cached?.decisions));
+    const [decisionForm, setDecisionForm] = useState({ title: "", context: "", decision: "", alternatives: "", consequences: "" });
+    const [editingDoc, setEditingDoc] = useState<ProjectDocument | null>(null);
+    const [docMeta, setDocMeta] = useState({ name: "", category: "General" });
+    const idempotencyKeys = useRef<Record<string, string>>({});
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
     const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 
@@ -250,6 +292,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             setInvoices(asArray<ProjectInvoice>(data.invoices));
             setTimeline(asArray<TimelineItem>(data.timeline));
             setOperations(data.operations ?? null);
+            setDecisions(asArray<Decision>(data.decisions));
         } catch {
             setProject(null);
         }
@@ -259,87 +302,86 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         fetchAll().finally(() => setLoading(false));
     }, [fetchAll]);
 
-    async function checkedFetch(input: RequestInfo | URL, init?: RequestInit) {
+    useEffect(() => {
+        const stored = window.localStorage.getItem(`notecode:view:${id}:tasks`);
+        if (stored === "lista" || stored === "kanban" || stored === "calendario") setTaskView(stored);
+    }, [id]);
+
+    useEffect(() => {
+        window.localStorage.setItem(`notecode:view:${id}:tasks`, taskView);
+        void fetch("/api/preferences", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scope: `project:${id}:tasks`, value: { view: taskView } }),
+        }).catch(() => undefined);
+    }, [id, taskView]);
+
+    function takeKey(action: string) {
+        if (!idempotencyKeys.current[action]) idempotencyKeys.current[action] = newIdempotencyKey();
+        return idempotencyKeys.current[action];
+    }
+
+    async function checkedFetch(input: RequestInfo | URL, init?: RequestInit, action?: string) {
         setActionError("");
-        const response = await fetch(input, init);
+        const headers = new Headers(init?.headers);
+        headers.set("X-Correlation-Id", crypto.randomUUID());
+        if (action && (init?.method === "POST" || !init?.method)) headers.set("Idempotency-Key", takeKey(action));
+        const response = await fetch(input, { ...init, headers });
         if (!response.ok) {
             const payload = await response.json().catch(() => null);
             const message = payload?.error || "No se pudo completar la operación.";
             setActionError(message);
             throw new Error(message);
         }
+        if (action) delete idempotencyKeys.current[action];
         return response;
     }
 
+    async function withSaving<T>(action: string, fn: () => Promise<T>, success: string) {
+        if (savingAction) return null;
+        setSavingAction(action);
+        try {
+            const result = await fn();
+            setNotice(success);
+            return result;
+        } finally {
+            setSavingAction(null);
+        }
+    }
+
     async function updateStatus() {
-        await checkedFetch(`/api/projects/${id}/status`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: newStatus, note: statusNote || null }),
-        });
-        setStatusOpen(false);
-        setStatusNote("");
-        await fetchAll();
+        await withSaving("status", async () => {
+            await checkedFetch(`/api/projects/${id}/status`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: newStatus, note: statusNote || null }),
+            }, "status");
+            setStatusOpen(false);
+            setStatusNote("");
+            await fetchAll();
+        }, "Estado actualizado.");
     }
 
     async function addRequirement() {
-        if (!reqDesc.trim()) return;
-        await checkedFetch(`/api/projects/${id}/requirements`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ description: reqDesc, category: reqCat, priority: reqPriority }),
-        });
-        setReqDesc("");
-        await fetchAll();
+        if (!reqDesc.trim() || savingAction) return;
+        await withSaving("requirement", async () => {
+            await checkedFetch(`/api/projects/${id}/requirements`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ description: reqDesc, category: reqCat, priority: reqPriority }),
+            }, "requirement");
+            setReqDesc("");
+            await fetchAll();
+        }, "Requisito guardado.");
     }
 
-    async function toggleRequirement(reqId: string, completed: boolean) {
-        const previousRequirements = requirements;
-        const nextRequirements = requirements.map((requirement) =>
-            requirement.id === reqId ? { ...requirement, completed } : requirement,
-        );
-
-        setRequirements(nextRequirements);
-        if (project) {
-            writeCachedJson(`project:${id}`, {
-                project,
-                statusLogs,
-                requirements: nextRequirements,
-                tasks,
-                techs,
-                credentials: creds,
-                notes,
-                documents,
-                operations: operations!,
-                timeline,
-            });
-        }
-
-        try {
-            const response = await checkedFetch(`/api/projects/${id}/requirements/${reqId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ completed }),
-            });
-
-            if (!response.ok) throw new Error("No se pudo actualizar el requisito.");
-        } catch {
-            setRequirements(previousRequirements);
-            if (project) {
-                writeCachedJson(`project:${id}`, {
-                    project,
-                    statusLogs,
-                    requirements: previousRequirements,
-                    tasks,
-                    techs,
-                    credentials: creds,
-                    notes,
-                    documents,
-                    operations: operations!,
-                    timeline,
-                });
-            }
-        }
+    async function toggleRequirement(reqId: string, completed: boolean, version: number) {
+        await checkedFetch(`/api/projects/${id}/requirements/${reqId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ completed, version }),
+        });
+        await fetchAll();
     }
 
     async function toggleClientVisibility(kind: "tasks" | "requirements", itemId: string, clientVisible: boolean) {
@@ -361,73 +403,167 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
 
     async function addTask() {
-        if (!taskTitle.trim()) return;
-        await checkedFetch(`/api/projects/${id}/tasks`, {
-            method: "POST",
+        if (!taskTitle.trim() || savingAction) return;
+        await withSaving("task", async () => {
+            await checkedFetch(`/api/projects/${id}/tasks`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: taskTitle,
+                    priority: taskPriority,
+                    dueDate: taskDueDate || null,
+                }),
+            }, "task");
+            setTaskTitle("");
+            setTaskDueDate("");
+            await fetchAll();
+        }, "Tarea guardada.");
+    }
+
+    async function moveTask(taskId: string, status: string, version: number) {
+        await checkedFetch(`/api/projects/${id}/tasks/${taskId}`, {
+            method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                title: taskTitle,
-                priority: taskPriority,
-                dueDate: taskDueDate || null,
-            }),
+            body: JSON.stringify({ status, version }),
         });
-        setTaskTitle("");
-        setTaskDueDate("");
         await fetchAll();
     }
 
-    async function moveTask(taskId: string, status: string) {
-        const previousTasks = tasks;
-        setTasks(tasks.map((task) => task.id === taskId ? { ...task, status } : task));
-
-        try {
-            const response = await checkedFetch(`/api/projects/${id}/tasks/${taskId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ status }),
-            });
-            if (!response.ok) throw new Error("No se pudo actualizar la tarea.");
-        } catch {
-            setTasks(previousTasks);
-        }
-    }
-
     async function deleteTask(taskId: string) {
-        if (!confirm("Eliminar esta tarea?")) return;
+        if (!confirm("¿Enviar esta tarea a la papelera?")) return;
         await checkedFetch(`/api/projects/${id}/tasks/${taskId}`, { method: "DELETE" });
+        setNotice("Tarea enviada a la papelera.");
         await fetchAll();
     }
 
     async function deleteRequirement(reqId: string) {
+        if (!confirm("¿Enviar este requisito a la papelera?")) return;
         await checkedFetch(`/api/projects/${id}/requirements/${reqId}`, { method: "DELETE" });
+        setNotice("Requisito enviado a la papelera.");
         await fetchAll();
     }
 
     async function addTech() {
-        if (!techName.trim()) return;
-        await checkedFetch(`/api/projects/${id}/techs`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: techName, category: techCat }),
-        });
-        setTechName("");
-        await fetchAll();
+        if (!techName.trim() || savingAction) return;
+        await withSaving("tech", async () => {
+            await checkedFetch(`/api/projects/${id}/techs`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: techName, category: techCat }),
+            }, "tech");
+            setTechName("");
+            await fetchAll();
+        }, "Tecnología guardada.");
     }
 
     async function deleteTech(techId: string) {
+        if (!confirm("¿Enviar esta tecnología a la papelera?")) return;
         await checkedFetch(`/api/projects/${id}/techs/${techId}`, { method: "DELETE" });
+        setNotice("Tecnología enviada a la papelera.");
         await fetchAll();
     }
 
     async function addCredential() {
-        await checkedFetch(`/api/projects/${id}/credentials`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(credForm),
-        });
-        setCredOpen(false);
-        setCredForm({ title: "", service: "", username: "", password: "", url: "", notes: "" });
-        await fetchAll();
+        if (savingAction) return;
+        await withSaving("credential", async () => {
+            await checkedFetch(`/api/projects/${id}/credentials`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(credForm),
+            }, "credential");
+            setCredOpen(false);
+            setCredForm({ title: "", service: "", username: "", password: "", url: "", notes: "" });
+            await fetchAll();
+        }, "Credencial guardada.");
+    }
+
+    async function saveTaskEdit() {
+        if (!editingTask) return;
+        await withSaving("task-edit", async () => {
+            await checkedFetch(`/api/projects/${id}/tasks/${editingTask.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: editingTask.title,
+                    description: editingTask.description,
+                    priority: editingTask.priority,
+                    dueDate: editingTask.dueDate,
+                    version: editingTask.version,
+                }),
+            });
+            setEditingTask(null);
+            await fetchAll();
+        }, "Tarea actualizada.");
+    }
+
+    async function saveReqEdit() {
+        if (!editingReq) return;
+        await withSaving("req-edit", async () => {
+            await checkedFetch(`/api/projects/${id}/requirements/${editingReq.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    description: editingReq.description,
+                    category: editingReq.category,
+                    priority: editingReq.priority,
+                    version: editingReq.version,
+                }),
+            });
+            setEditingReq(null);
+            await fetchAll();
+        }, "Requisito actualizado.");
+    }
+
+    async function saveTechEdit() {
+        if (!editingTech) return;
+        await withSaving("tech-edit", async () => {
+            await checkedFetch(`/api/projects/${id}/techs/${editingTech.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: editingTech.name, category: editingTech.category, version: editingTech.version }),
+            });
+            setEditingTech(null);
+            await fetchAll();
+        }, "Tecnología actualizada.");
+    }
+
+    async function saveProjectMeta() {
+        if (!project) return;
+        await withSaving("project-meta", async () => {
+            await checkedFetch(`/api/projects/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...projectForm, version: project.version }),
+            });
+            setEditingProject(false);
+            await fetchAll();
+        }, "Proyecto actualizado.");
+    }
+
+    async function saveDocumentMeta() {
+        if (!editingDoc) return;
+        await withSaving("doc-meta", async () => {
+            await checkedFetch(`/api/documents/${editingDoc.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: docMeta.name, category: docMeta.category, version: editingDoc.version }),
+            });
+            setEditingDoc(null);
+            await fetchAll();
+        }, "Documento actualizado.");
+    }
+
+    async function addDecision() {
+        if (!decisionForm.title.trim() || savingAction) return;
+        await withSaving("decision", async () => {
+            await checkedFetch(`/api/projects/${id}/decisions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(decisionForm),
+            }, "decision");
+            setDecisionForm({ title: "", context: "", decision: "", alternatives: "", consequences: "" });
+            await fetchAll();
+        }, "Decisión registrada.");
     }
 
     async function deleteCredential(credId: string) {
@@ -458,22 +594,24 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
 
     async function saveNote() {
-        if (!noteTitle.trim()) return;
-        if (editingNoteId) {
-            await checkedFetch(`/api/projects/${id}/notes/${editingNoteId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: noteTitle, content: noteContent }),
-            });
-        } else {
-            await checkedFetch(`/api/projects/${id}/notes`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: noteTitle, content: noteContent }),
-            });
-        }
-        closeNoteModal();
-        await fetchAll();
+        if (!noteTitle.trim() || savingAction) return;
+        await withSaving("note", async () => {
+            if (editingNoteId) {
+                await checkedFetch(`/api/projects/${id}/notes/${editingNoteId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: noteTitle, content: noteContent }),
+                });
+            } else {
+                await checkedFetch(`/api/projects/${id}/notes`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: noteTitle, content: noteContent }),
+                }, "note");
+            }
+            closeNoteModal();
+            await fetchAll();
+        }, editingNoteId ? "Nota actualizada." : "Nota guardada.");
     }
 
     async function deleteNote(noteId: string) {
@@ -523,6 +661,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 await ensureRecentWebAuthn();
                 const secret = await revealCredential(cId);
                 setRevealedSecrets(prev => ({ ...prev, [cId]: secret }));
+                window.setTimeout(() => {
+                    setRevealedSecrets(prev => {
+                        const next = { ...prev };
+                        delete next[cId];
+                        return next;
+                    });
+                    setRevealed(prev => {
+                        const next = new Set(prev);
+                        next.delete(cId);
+                        return next;
+                    });
+                }, 12_000);
             } catch (error) {
                 alert(error instanceof Error ? error.message : "No se pudo revelar la credencial.");
                 return;
@@ -562,6 +712,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         { key: "tasks", label: "Tareas", count: tasks.length },
         { key: "timeline", label: "Timeline", count: timeline.length },
         { key: "requirements", label: "Requisitos", count: requirements.length },
+        { key: "decisions", label: "Decisiones", count: decisions.length },
         { key: "techs", label: "Tecnologías", count: techs.length },
         { key: "credentials", label: "Credenciales", count: creds.length },
         { key: "notes", label: "Notas", count: notes.length },
@@ -570,6 +721,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     return (
         <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+            <div aria-live="polite" className="sr-only">{notice}{savingAction ? " Guardando…" : ""}</div>
+            {notice && <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-200">{notice}</p>}
+            {actionError && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">{actionError}</p>}
             {/* Header */}
             <div className="space-y-4">
                 <Link href="/proyectos" className="inline-flex items-center gap-1.5 text-[13px] text-neutral-400 hover:text-neutral-200 transition-colors">
@@ -584,10 +738,35 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         {project.description && (
                             <p className="text-[14px] text-neutral-400 mt-2 max-w-2xl">{project.description}</p>
                         )}
+                        {(project.objective || project.scope) && (
+                            <div className="mt-3 max-w-2xl space-y-1 text-[13px] text-neutral-400">
+                                {project.objective && <p><span className="text-neutral-500">Objetivo:</span> {project.objective}</p>}
+                                {project.scope && <p><span className="text-neutral-500">Alcance:</span> {project.scope}</p>}
+                            </div>
+                        )}
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <StatusBadge status={project.status} />
                         <button
+                            type="button"
+                            onClick={() => {
+                                setProjectForm({
+                                    description: project.description || "",
+                                    objective: project.objective || "",
+                                    specificObjectives: project.specificObjectives || "",
+                                    scope: project.scope || "",
+                                    exclusions: project.exclusions || "",
+                                    priority: project.priority || "Media",
+                                });
+                                setEditingProject(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-1.5 text-[12px] font-medium text-neutral-300 hover:bg-white/5 transition-colors"
+                        >
+                            <Pencil size={12} strokeWidth={1.5} />
+                            Editar ficha
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => { setNewStatus(project.status); setStatusNote(""); setStatusOpen(true); }}
                             className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-1.5 text-[12px] font-medium text-neutral-300 hover:bg-white/5 transition-colors"
                         >
@@ -712,26 +891,66 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {/* Tab: Tasks */}
             {tab === "tasks" && (
                 <div className="space-y-5">
+                    <div className="flex flex-wrap gap-2">
+                        {(["kanban", "lista", "calendario"] as const).map((view) => (
+                            <button key={view} type="button" onClick={() => setTaskView(view)} className={`rounded-full border px-3 py-1.5 text-[12px] ${taskView === view ? "border-white/20 bg-neutral-100 text-neutral-950" : "border-white/10 text-neutral-400"}`}>
+                                {view === "kanban" ? "Tablero" : view === "lista" ? "Lista" : "Calendario"}
+                            </button>
+                        ))}
+                    </div>
                     <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+                        <label className="sr-only" htmlFor="new-task">Nueva tarea</label>
                         <input
+                            id="new-task"
                             value={taskTitle}
+                            disabled={savingAction === "task"}
                             onChange={e => setTaskTitle(e.target.value)}
                             onKeyDown={e => { if (e.key === "Enter") addTask(); }}
                             placeholder="Nueva tarea..."
-                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20"
+                            className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20 disabled:opacity-60"
                         />
-                        <select value={taskPriority} onChange={e => setTaskPriority(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
+                        <select aria-label="Prioridad de la tarea" value={taskPriority} disabled={savingAction === "task"} onChange={e => setTaskPriority(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
-                        <input type="date" value={taskDueDate} onChange={e => setTaskDueDate(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200" />
-                        <button onClick={addTask} className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
-                            <Plus size={14} strokeWidth={2} />
+                        <input aria-label="Fecha de la tarea" type="date" value={taskDueDate} disabled={savingAction === "task"} onChange={e => setTaskDueDate(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200" />
+                        <button type="button" onClick={addTask} disabled={savingAction === "task"} aria-label="Agregar tarea" className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">
+                            {savingAction === "task" ? "Guardando…" : <Plus size={14} strokeWidth={2} />}
                         </button>
                     </div>
 
+                    {taskView === "calendario" ? (
+                        <div className="space-y-2 rounded-lg border border-white/10 bg-neutral-900 p-4">
+                            {tasks.filter((task) => task.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map((task) => (
+                                <div key={task.id} className="flex items-center justify-between gap-3 text-[13px]">
+                                    <span className="text-neutral-400">{new Date(task.dueDate as string).toLocaleDateString("es-CL")}</span>
+                                    <span className="flex-1 text-neutral-100">{task.title}</span>
+                                    <span className="text-neutral-500">{task.status}</span>
+                                </div>
+                            ))}
+                            {tasks.every((task) => !task.dueDate) && <p className="text-[13px] text-neutral-500">No hay tareas con fecha.</p>}
+                        </div>
+                    ) : taskView === "lista" ? (
+                        <div className="overflow-x-auto rounded-lg border border-white/10">
+                            <table className="min-w-full text-left text-[13px]">
+                                <thead className="bg-neutral-900 text-neutral-500">
+                                    <tr><th className="px-3 py-2">Tarea</th><th className="px-3 py-2">Estado</th><th className="px-3 py-2">Prioridad</th><th className="px-3 py-2">Fecha</th></tr>
+                                </thead>
+                                <tbody>
+                                    {tasks.map((task) => (
+                                        <tr key={task.id} className="border-t border-white/5">
+                                            <td className="px-3 py-2 text-neutral-100">{task.title}</td>
+                                            <td className="px-3 py-2">{task.status}</td>
+                                            <td className="px-3 py-2">{task.priority}</td>
+                                            <td className="px-3 py-2">{task.dueDate ? new Date(task.dueDate).toLocaleDateString("es-CL") : "—"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
                     <div className="grid gap-3 xl:grid-cols-4">
                         {TASK_STATUSES.map((status) => {
-                            const columnTasks = tasks.filter((task) => task.status === status);
+                            const columnTasks = tasks.filter((task) => task.status === status && (!query || task.title.toLowerCase().includes(query.toLowerCase())) && (priorityFilter === "all" || task.priority === priorityFilter));
                             return (
                                 <section key={status} className="min-h-48 rounded-lg border border-white/10 bg-neutral-900">
                                     <div className="flex items-center justify-between border-b border-white/5 px-3 py-2.5">
@@ -743,14 +962,19 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                             <article key={task.id} className="rounded-md border border-white/10 bg-neutral-950 p-3">
                                                 <div className="flex items-start justify-between gap-2">
                                                     <h4 className="text-[13px] font-medium leading-snug text-neutral-100">{task.title}</h4>
-                                                    <button onClick={() => deleteTask(task.id)} className="shrink-0 text-neutral-600 hover:text-red-400">
-                                                        <Trash2 size={12} strokeWidth={1.5} />
-                                                    </button>
+                                                    <div className="flex gap-1">
+                                                        <button type="button" onClick={() => setEditingTask(task)} className="shrink-0 text-neutral-600 hover:text-neutral-200" aria-label={`Editar tarea ${task.title}`}>
+                                                            <Pencil size={12} strokeWidth={1.5} />
+                                                        </button>
+                                                        <button type="button" onClick={() => deleteTask(task.id)} className="shrink-0 text-neutral-600 hover:text-red-400" aria-label={`Eliminar tarea ${task.title}`}>
+                                                            <Trash2 size={12} strokeWidth={1.5} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                                 {task.description && <p className="mt-2 text-[12px] text-neutral-500">{task.description}</p>}
                                                 <div className="mt-3 flex flex-wrap items-center gap-2">
                                                     <PriorityBadge priority={task.priority} />
-                                                    <button onClick={() => toggleClientVisibility("tasks", task.id, !task.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${task.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
+                                                    <button type="button" onClick={() => toggleClientVisibility("tasks", task.id, !task.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${task.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
                                                         {task.clientVisible ? "Visible al cliente" : "Solo interno"}
                                                     </button>
                                                     {task.dueDate && (
@@ -760,7 +984,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                                         </span>
                                                     )}
                                                 </div>
-                                                <select value={task.status} onChange={(e) => moveTask(task.id, e.target.value)} className="mt-3 w-full rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-[12px] text-neutral-300">
+                                                <select aria-label={`Estado de ${task.title}`} value={task.status} onChange={(e) => moveTask(task.id, e.target.value, task.version)} className="mt-3 w-full rounded-md border border-white/10 bg-neutral-900 px-2 py-1.5 text-[12px] text-neutral-300">
                                                     {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                                                 </select>
                                             </article>
@@ -771,6 +995,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                             );
                         })}
                     </div>
+                    )}
                 </div>
             )}
 
@@ -796,44 +1021,96 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             {/* Tab: Requirements */}
             {tab === "requirements" && (
                 <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                        <label className="sr-only" htmlFor="req-search">Buscar requisitos</label>
+                        <input id="req-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar en el proyecto" className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px]" />
+                        <select aria-label="Filtrar prioridad" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px]">
+                            <option value="all">Todas las prioridades</option>
+                            {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                    </div>
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+                        <label className="sr-only" htmlFor="new-req">Nuevo requisito</label>
                         <input
+                            id="new-req"
                             value={reqDesc}
+                            disabled={savingAction === "requirement"}
                             onChange={e => setReqDesc(e.target.value)}
                             onKeyDown={e => { if (e.key === "Enter") addRequirement(); }}
                             placeholder="Nuevo requerimiento..."
-                            className="flex-1 rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20"
+                            className="flex-1 rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20 disabled:opacity-60"
                         />
-                        <select value={reqCat} onChange={e => setReqCat(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
+                        <select aria-label="Categoría del requisito" value={reqCat} disabled={savingAction === "requirement"} onChange={e => setReqCat(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {REQ_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <select value={reqPriority} onChange={e => setReqPriority(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
+                        <select aria-label="Prioridad del requisito" value={reqPriority} disabled={savingAction === "requirement"} onChange={e => setReqPriority(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
-                        <button onClick={addRequirement} className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
-                            <Plus size={14} strokeWidth={2} />
+                        <button type="button" onClick={addRequirement} disabled={savingAction === "requirement"} aria-label="Agregar requisito" className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">
+                            {savingAction === "requirement" ? "Guardando…" : <Plus size={14} strokeWidth={2} />}
                         </button>
                     </div>
                     <div className="space-y-1">
-                        {requirements.map(req => (
+                        {requirements.filter((req) => (!query || `${req.code} ${req.description}`.toLowerCase().includes(query.toLowerCase())) && (priorityFilter === "all" || req.priority === priorityFilter)).map(req => (
                             <div key={req.id} className="group flex items-start gap-3 rounded-lg px-3 py-3 hover:bg-white/[0.02] sm:items-center sm:px-4 sm:py-2.5">
-                                <button onClick={() => toggleRequirement(req.id, !req.completed)} className="shrink-0">
+                                <button type="button" onClick={() => toggleRequirement(req.id, !req.completed, req.version)} className="shrink-0" aria-label={req.completed ? `Marcar ${req.code} como pendiente` : `Completar ${req.code}`}>
                                     <div className={`h-4 w-4 rounded border ${req.completed ? "bg-neutral-100 border-neutral-100 flex items-center justify-center" : "border-white/20"}`}>
                                         {req.completed && <Check size={10} strokeWidth={3} className="text-neutral-950" />}
                                     </div>
                                 </button>
+                                <span className="w-14 shrink-0 text-[11px] font-mono text-neutral-500">{req.code}</span>
                                 <span className={`flex-1 text-[14px] ${req.completed ? "text-neutral-500 line-through" : "text-neutral-200"}`}>
                                     {req.description}
                                 </span>
                                 <span className="text-[11px] text-neutral-600">{req.category}</span>
                                 <PriorityBadge priority={req.priority} />
-                                <button onClick={() => toggleClientVisibility("requirements", req.id, !req.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${req.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
+                                <button type="button" onClick={() => toggleClientVisibility("requirements", req.id, !req.clientVisible)} className={`rounded-full border px-2 py-0.5 text-[10px] ${req.clientVisible ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300" : "border-white/10 text-neutral-500"}`}>
                                     {req.clientVisible ? "Visible al cliente" : "Solo interno"}
                                 </button>
-                                <button onClick={() => deleteRequirement(req.id)} className="rounded p-1 text-neutral-700 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
+                                <button type="button" onClick={() => setEditingReq(req)} className="rounded p-1 text-neutral-500 hover:text-neutral-200" aria-label={`Editar ${req.code}`}>
+                                    <Pencil size={12} strokeWidth={1.5} />
+                                </button>
+                                <button type="button" onClick={() => deleteRequirement(req.id)} className="rounded p-1 text-neutral-700 hover:text-red-400" aria-label={`Eliminar ${req.code}`}>
                                     <Trash2 size={12} strokeWidth={1.5} />
                                 </button>
                             </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {tab === "decisions" && (
+                <div className="space-y-4">
+                    <form onSubmit={(event) => { event.preventDefault(); addDecision(); }} className="space-y-3 rounded-lg border border-white/10 bg-neutral-900 p-4">
+                        <label className="block text-[13px] text-neutral-300">Título
+                            <input required value={decisionForm.title} disabled={savingAction === "decision"} onChange={(e) => setDecisionForm({ ...decisionForm, title: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" />
+                        </label>
+                        <label className="block text-[13px] text-neutral-300">Contexto
+                            <textarea value={decisionForm.context} disabled={savingAction === "decision"} onChange={(e) => setDecisionForm({ ...decisionForm, context: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} />
+                        </label>
+                        <label className="block text-[13px] text-neutral-300">Decisión
+                            <textarea value={decisionForm.decision} disabled={savingAction === "decision"} onChange={(e) => setDecisionForm({ ...decisionForm, decision: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} />
+                        </label>
+                        <label className="block text-[13px] text-neutral-300">Alternativas
+                            <textarea value={decisionForm.alternatives} disabled={savingAction === "decision"} onChange={(e) => setDecisionForm({ ...decisionForm, alternatives: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} />
+                        </label>
+                        <label className="block text-[13px] text-neutral-300">Consecuencias
+                            <textarea value={decisionForm.consequences} disabled={savingAction === "decision"} onChange={(e) => setDecisionForm({ ...decisionForm, consequences: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} />
+                        </label>
+                        <button type="submit" disabled={savingAction === "decision"} className="rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 disabled:opacity-50">
+                            {savingAction === "decision" ? "Guardando…" : "Registrar decisión"}
+                        </button>
+                    </form>
+                    <div className="space-y-3">
+                        {decisions.map((item) => (
+                            <article key={item.id} className="rounded-lg border border-white/10 bg-neutral-900 p-4">
+                                <h3 className="text-[15px] font-semibold text-neutral-100">{item.title}</h3>
+                                <p className="mt-1 text-[11px] uppercase tracking-wide text-neutral-500">{item.status}</p>
+                                {item.context && <p className="mt-2 text-[13px] text-neutral-400"><strong>Contexto:</strong> {item.context}</p>}
+                                {item.decision && <p className="mt-1 text-[13px] text-neutral-300"><strong>Decisión:</strong> {item.decision}</p>}
+                                {item.alternatives && <p className="mt-1 text-[13px] text-neutral-500"><strong>Alternativas:</strong> {item.alternatives}</p>}
+                                {item.consequences && <p className="mt-1 text-[13px] text-neutral-500"><strong>Consecuencias:</strong> {item.consequences}</p>}
+                            </article>
                         ))}
                     </div>
                 </div>
@@ -853,8 +1130,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <select value={techCat} onChange={e => setTechCat(e.target.value)} className="rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-[13px] text-neutral-200">
                             {TECH_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <button onClick={addTech} className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">
-                            <Plus size={14} strokeWidth={2} />
+                        <button type="button" onClick={addTech} disabled={savingAction === "tech"} aria-label="Agregar tecnología" className="inline-flex items-center justify-center rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">
+                            {savingAction === "tech" ? "Guardando…" : <Plus size={14} strokeWidth={2} />}
                         </button>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -868,7 +1145,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                         {catTechs.map(t => (
                                             <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-neutral-800 px-3 py-1.5 text-[13px] text-neutral-200 group">
                                                 {t.name}
-                                                <button onClick={() => deleteTech(t.id)} className="text-neutral-600 opacity-100 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100">
+                                                <button type="button" onClick={() => setEditingTech(t)} className="text-neutral-600 hover:text-neutral-200" aria-label={`Editar ${t.name}`}>
+                                                    <Pencil size={11} strokeWidth={2} />
+                                                </button>
+                                                <button type="button" onClick={() => deleteTech(t.id)} className="text-neutral-600 hover:text-red-400" aria-label={`Eliminar ${t.name}`}>
                                                     <X size={11} strokeWidth={2} />
                                                 </button>
                                             </span>
@@ -927,10 +1207,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                     <input required placeholder="Título" value={credForm.title} onChange={e => setCredForm({ ...credForm, title: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <input required placeholder="Servicio" value={credForm.service} onChange={e => setCredForm({ ...credForm, service: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <input required placeholder="Usuario" value={credForm.username} onChange={e => setCredForm({ ...credForm, username: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
-                                    <input required placeholder="Contraseña" value={credForm.password} onChange={e => setCredForm({ ...credForm, password: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
+                                    <label className="block text-[13px] text-neutral-300">Contraseña
+                                        <input required type="password" autoComplete="new-password" placeholder="Secreto" value={credForm.password} onChange={e => setCredForm({ ...credForm, password: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
+                                    </label>
                                     <input placeholder="URL" value={credForm.url} onChange={e => setCredForm({ ...credForm, url: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <input placeholder="Notas" value={credForm.notes} onChange={e => setCredForm({ ...credForm, notes: e.target.value })} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
-                                    <button type="submit" className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">Crear</button>
+                                    <button type="submit" disabled={savingAction === "credential"} className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">{savingAction === "credential" ? "Guardando…" : "Crear"}</button>
                                 </form>
                             </div>
                         </div>
@@ -951,7 +1233,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="flex-1">
                                         <h4 className="text-[15px] font-semibold text-neutral-100">{n.title}</h4>
-                                        <pre className="text-[13px] text-neutral-400 whitespace-pre-wrap mt-2 font-sans">{n.content || "Sin contenido"}</pre>
+                                        <div className="mt-2"><MarkdownPreview content={n.content || "Sin contenido"} /></div>
                                         <p className="text-[11px] text-neutral-600 mt-3">
                                             Actualizado: {new Date(n.updatedAt).toLocaleString("es-MX")}
                                         </p>
@@ -980,7 +1262,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 <form onSubmit={e => { e.preventDefault(); saveNote(); }} className="space-y-4">
                                     <input required placeholder="Título de la nota" value={noteTitle} onChange={e => setNoteTitle(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100" />
                                     <textarea rows={6} placeholder="Contenido..." value={noteContent} onChange={e => setNoteContent(e.target.value)} className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 resize-none" />
-                                    <button type="submit" className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white">{editingNoteId ? "Guardar cambios" : "Crear Nota"}</button>
+                                    <button type="submit" disabled={savingAction === "note"} className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-[13px] font-semibold text-neutral-950 hover:bg-white disabled:opacity-50">{savingAction === "note" ? "Guardando…" : editingNoteId ? "Guardar cambios" : "Crear Nota"}</button>
                                 </form>
                             </div>
                         </div>
@@ -1023,6 +1305,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEditingDoc(doc); setDocMeta({ name: doc.name, category: doc.category }); }}
+                                        className="rounded-md border border-white/10 px-2.5 py-2 text-[11px] text-neutral-400"
+                                        aria-label={`Editar metadatos de ${doc.name}`}
+                                    >
+                                        Editar
+                                    </button>
                                     <button
                                         type="button"
                                         onClick={() => toggleDocumentVisibility(doc.id, !doc.clientVisible)}
@@ -1123,6 +1413,85 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
             )}
 
+            {editingTask && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="edit-task-title">
+                    <form onSubmit={(event) => { event.preventDefault(); saveTaskEdit(); }} className="w-full max-w-md space-y-3 rounded-xl border border-white/10 bg-neutral-900 p-5">
+                        <h2 id="edit-task-title" className="text-[17px] font-semibold">Editar tarea</h2>
+                        <label className="block text-[13px]">Título
+                            <input value={editingTask.title} onChange={(e) => setEditingTask({ ...editingTask, title: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" />
+                        </label>
+                        <label className="block text-[13px]">Descripción
+                            <textarea value={editingTask.description || ""} onChange={(e) => setEditingTask({ ...editingTask, description: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={3} />
+                        </label>
+                        <label className="block text-[13px]">Prioridad
+                            <select value={editingTask.priority} onChange={(e) => setEditingTask({ ...editingTask, priority: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2">
+                                {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                        </label>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setEditingTask(null)} className="flex-1 rounded-lg border border-white/10 px-3 py-2">Cancelar</button>
+                            <button type="submit" disabled={savingAction === "task-edit"} className="flex-1 rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-950 disabled:opacity-50">{savingAction === "task-edit" ? "Guardando…" : "Guardar"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {editingReq && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="edit-req-title">
+                    <form onSubmit={(event) => { event.preventDefault(); saveReqEdit(); }} className="w-full max-w-md space-y-3 rounded-xl border border-white/10 bg-neutral-900 p-5">
+                        <h2 id="edit-req-title" className="text-[17px] font-semibold">Editar {editingReq.code}</h2>
+                        <label className="block text-[13px]">Descripción
+                            <textarea value={editingReq.description} onChange={(e) => setEditingReq({ ...editingReq, description: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={3} />
+                        </label>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setEditingReq(null)} className="flex-1 rounded-lg border border-white/10 px-3 py-2">Cancelar</button>
+                            <button type="submit" disabled={savingAction === "req-edit"} className="flex-1 rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-950 disabled:opacity-50">{savingAction === "req-edit" ? "Guardando…" : "Guardar"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {editingTech && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true">
+                    <form onSubmit={(event) => { event.preventDefault(); saveTechEdit(); }} className="w-full max-w-md space-y-3 rounded-xl border border-white/10 bg-neutral-900 p-5">
+                        <h2 className="text-[17px] font-semibold">Editar tecnología</h2>
+                        <label className="block text-[13px]">Nombre
+                            <input value={editingTech.name} onChange={(e) => setEditingTech({ ...editingTech, name: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" />
+                        </label>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setEditingTech(null)} className="flex-1 rounded-lg border border-white/10 px-3 py-2">Cancelar</button>
+                            <button type="submit" disabled={savingAction === "tech-edit"} className="flex-1 rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-950 disabled:opacity-50">{savingAction === "tech-edit" ? "Guardando…" : "Guardar"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {editingProject && project && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true">
+                    <form onSubmit={(event) => { event.preventDefault(); saveProjectMeta(); }} className="max-h-[calc(100vh-2rem)] w-full max-w-lg space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5">
+                        <h2 className="text-[17px] font-semibold">Editar proyecto</h2>
+                        <label className="block text-[13px]">Descripción<textarea value={projectForm.description} onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} /></label>
+                        <label className="block text-[13px]">Objetivo general<textarea value={projectForm.objective} onChange={(e) => setProjectForm({ ...projectForm, objective: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} /></label>
+                        <label className="block text-[13px]">Objetivos específicos<textarea value={projectForm.specificObjectives} onChange={(e) => setProjectForm({ ...projectForm, specificObjectives: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} /></label>
+                        <label className="block text-[13px]">Alcance<textarea value={projectForm.scope} onChange={(e) => setProjectForm({ ...projectForm, scope: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} /></label>
+                        <label className="block text-[13px]">Exclusiones<textarea value={projectForm.exclusions} onChange={(e) => setProjectForm({ ...projectForm, exclusions: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" rows={2} /></label>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setEditingProject(false)} className="flex-1 rounded-lg border border-white/10 px-3 py-2">Cancelar</button>
+                            <button type="submit" disabled={savingAction === "project-meta"} className="flex-1 rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-950 disabled:opacity-50">{savingAction === "project-meta" ? "Guardando…" : "Guardar"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {editingDoc && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-modal="true">
+                    <form onSubmit={(event) => { event.preventDefault(); saveDocumentMeta(); }} className="w-full max-w-md space-y-3 rounded-xl border border-white/10 bg-neutral-900 p-5">
+                        <h2 className="text-[17px] font-semibold">Editar documento</h2>
+                        <label className="block text-[13px]">Nombre<input value={docMeta.name} onChange={(e) => setDocMeta({ ...docMeta, name: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" /></label>
+                        <label className="block text-[13px]">Categoría<input value={docMeta.category} onChange={(e) => setDocMeta({ ...docMeta, category: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2" /></label>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setEditingDoc(null)} className="flex-1 rounded-lg border border-white/10 px-3 py-2">Cancelar</button>
+                            <button type="submit" disabled={savingAction === "doc-meta"} className="flex-1 rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-950 disabled:opacity-50">{savingAction === "doc-meta" ? "Guardando…" : "Guardar"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
             {/* Status Update Modal */}
             {statusOpen && (
                 <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
