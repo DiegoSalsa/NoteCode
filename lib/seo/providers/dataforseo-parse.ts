@@ -41,7 +41,7 @@ const FEATURE_TYPES: Record<string, SerpFeature> = {
   google_reviews: "local_pack",
 };
 
-export function parseDataForSeoSerp(payload: DataForSeoLiveResponse, device: SerpDevice = "desktop"): SerpResponse {
+export function parseDataForSeoSerp(payload: DataForSeoLiveResponse, device: SerpDevice = "desktop", mode: "live" | "standard" = "live"): SerpResponse {
   const task = payload.tasks?.[0];
   const result = task?.result?.[0];
   const items = result?.items ?? [];
@@ -82,5 +82,11 @@ export function parseDataForSeoSerp(payload: DataForSeoLiveResponse, device: Ser
     features: [...features],
     itemCount: result?.items_count ?? items.length,
     taskId: task?.id ?? null,
+    mode,
   };
+}
+
+export function isDataForSeoPending(payload: DataForSeoLiveResponse) {
+  const status = payload.tasks?.[0]?.status_code ?? payload.status_code ?? 0;
+  return status === 40601 || status === 40602 || status === 20100;
 }

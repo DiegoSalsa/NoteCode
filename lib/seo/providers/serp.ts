@@ -43,6 +43,8 @@ export type KeywordData = {
   intent: string | null;
 };
 
+export type SerpMode = "live" | "standard";
+
 export type SerpQuery = {
   keyword: string;
   country: string;
@@ -50,6 +52,7 @@ export type SerpQuery = {
   device: SerpDevice;
   location?: string;
   depth?: number;
+  mode?: SerpMode;
 };
 
 export type SerpResponse = {
@@ -61,11 +64,20 @@ export type SerpResponse = {
   features: SerpFeature[];
   itemCount: number;
   taskId: string | null;
+  mode: SerpMode;
+};
+
+export type SerpTaskHandle = {
+  taskId: string;
+  keyword: string;
+  costUsd: number;
 };
 
 export interface SerpProvider {
   readonly name: string;
   getOrganicResults(query: SerpQuery): Promise<SerpResponse>;
+  submitOrganicTasks(queries: SerpQuery[]): Promise<SerpTaskHandle[]>;
+  fetchOrganicTask(taskId: string, device?: SerpDevice): Promise<SerpResponse | null>;
   getKeywordData(query: SerpQuery): Promise<KeywordData | null>;
 }
 

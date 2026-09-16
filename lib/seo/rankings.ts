@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { logEvent } from "@/lib/log";
 import { formatDateUTC, utcToday } from "@/lib/seo/dates";
-import { estimateLiveSerpCostUsd, seoSerpConcurrency, seoSerpDepth, seoSerpStoreLimit } from "@/lib/seo/config";
+import { estimateSerpCostUsd, seoSerpConcurrency, seoSerpDepth, seoSerpModeForTrigger, seoSerpStoreLimit } from "@/lib/seo/config";
 import { BudgetExceededError, assertBudget, defaultSerpBudgets } from "@/lib/seo/budget";
 import { beginJob, finishJob, jobKey, type SeoSyncTrigger } from "@/lib/seo/sync";
 import { getSerpProvider } from "@/lib/seo/providers";
@@ -213,11 +213,80 @@ export async function syncProjectRankings(
   const spendState = await loadProviderSpend("dataforseo");
   let spentDaily = spendState.dailyUsd;
   let spentMonthly = spendState.monthlyUsd;
-  const nextCost = estimateLiveSerpCostUsd(seoSerpDepth());
+  const mode = seoSerpModeForTrigger(trigger);
+  const nextCost = estimateSerpCostUsd(mode, seoSerpDepth());
   const projectDomain = seoProject.primaryDomain || seoProject.gscProperty?.hostname || seoProject.gscProperty?.siteUrl || null;
   const reserveBudget = createLock();
 
+  if (mode === "standard") {
+    const pending = keywords.filter((item) => item.pendingSerpTaskId);
+    for (const keyword of pending) {
+      try {
+        const ready = await provider.fetchOrganicTask(keyword.pendingSerpTaskId!, asDevice(keyword.device));
+        if (!ready) continue;
+        await persistSerp({ keyword, projectDomain, day, providerName: provider.name, response: ready });
+        await prisma.seoKeyword.update({ where: { id: keyword.id }, data: { pendingSerpTaskId: null, pendingSerpTaskAt: null } });
+        stats.keywordsSuccess += 1;
+        stats.estimatedCost += ready.costUsd;
+      } catch {
+        stats.keywordsFailed += 1;
+      }
+    }
+  }
+
   try {
+    if (mode === "standard") {
+      const remaining = [];
+      for (const keyword of keywords) {
+        if (await rankingExistsToday(keyword.id, day) || keyword.pendingSerpTaskId) {
+          if (await rankingExistsToday(keyword.id, day)) stats.keywordsSkipped += 1;
+          continue;
+        }
+        remaining.push(keyword);
+      }
+      for (const keyword of remaining) {
+        assertBudget({ dailyUsd: spentDaily, monthlyUsd: spentMonthly }, limits, nextCost);
+        spentDaily += nextCost;
+        spentMonthly += nextCost;
+      }
+      if (remaining.length) {
+        const handles = await provider.submitOrganicTasks(remaining.map((keyword) => ({
+          keyword: keyword.keyword,
+          country: keyword.country,
+          language: keyword.language,
+          device: asDevice(keyword.device),
+          location: keyword.location || undefined,
+          depth: seoSerpDepth(),
+          mode: "standard",
+        })));
+        for (let index = 0; index < remaining.length; index += 1) {
+          const keyword = remaining[index];
+          const handle = handles[index];
+          if (!keyword || !handle) continue;
+          stats.estimatedCost += handle.costUsd;
+          await recordSeoApiUsage({
+            provider: provider.name,
+            endpoint: "serp/google/organic/task_post",
+            operation: "organic_serp_standard",
+            requests: 1,
+            units: Math.max(1, Math.ceil(seoSerpDepth() / 10)),
+            estimatedCost: handle.costUsd,
+            responseStatus: "submitted",
+            seoProjectId,
+          });
+          const ready = await provider.fetchOrganicTask(handle.taskId, asDevice(keyword.device));
+          if (ready) {
+            await persistSerp({ keyword, projectDomain, day, providerName: provider.name, response: { ...ready, costUsd: ready.costUsd || handle.costUsd } });
+            stats.keywordsSuccess += 1;
+          } else {
+            await prisma.seoKeyword.update({
+              where: { id: keyword.id },
+              data: { pendingSerpTaskId: handle.taskId, pendingSerpTaskAt: new Date(), lastSyncStatus: "pending" },
+            });
+          }
+        }
+      }
+    } else
     await mapPool(keywords, seoSerpConcurrency(), async (keyword) => {
       if (await rankingExistsToday(keyword.id, day)) {
         stats.keywordsSkipped += 1;
@@ -238,6 +307,7 @@ export async function syncProjectRankings(
           device: asDevice(keyword.device),
           location: keyword.location || undefined,
           depth: seoSerpDepth(),
+          mode,
         });
         const cost = response.costUsd || nextCost;
         const delta = cost - nextCost;
@@ -249,7 +319,7 @@ export async function syncProjectRankings(
         await recordSeoApiUsage({
           provider: provider.name,
           endpoint: "serp/google/organic/live/advanced",
-          operation: "organic_serp",
+          operation: "organic_serp_live",
           requests: 1,
           units: Math.max(1, Math.ceil(seoSerpDepth() / 10)),
           estimatedCost: cost,

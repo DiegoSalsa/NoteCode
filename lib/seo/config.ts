@@ -103,3 +103,43 @@ export function seoLiveSerpUnitCostUsd() {
 export function estimateLiveSerpCostUsd(depth = seoSerpDepth()) {
   return seoLiveSerpUnitCostUsd() * Math.max(1, Math.ceil(depth / 10));
 }
+
+export function seoStandardSerpUnitCostUsd() {
+  const value = Number(process.env.SEO_DATAFORSEO_STANDARD_UNIT_USD || "0.0006");
+  return Number.isFinite(value) && value >= 0 ? value : 0.0006;
+}
+
+export function estimateSerpCostUsd(mode: "live" | "standard" = "live", depth = seoSerpDepth()) {
+  const unit = mode === "standard" ? seoStandardSerpUnitCostUsd() : seoLiveSerpUnitCostUsd();
+  return unit * Math.max(1, Math.ceil(depth / 10));
+}
+
+export function seoSerpManualMode(): "live" | "standard" {
+  const value = (process.env.SEO_SERP_MANUAL_MODE || "live").trim().toLowerCase();
+  return value === "standard" ? "standard" : "live";
+}
+
+export function seoSerpScheduledMode(): "live" | "standard" {
+  const value = (process.env.SEO_SERP_SCHEDULED_MODE || "standard").trim().toLowerCase();
+  return value === "live" ? "live" : "standard";
+}
+
+export function seoSerpModeForTrigger(trigger: "manual" | "cron"): "live" | "standard" {
+  return trigger === "cron" ? seoSerpScheduledMode() : seoSerpManualMode();
+}
+
+export function isSeoAuditEnabled() {
+  const value = process.env.SEO_AUDIT_ENABLED;
+  if (value == null || value === "") return true;
+  return !["0", "false", "off", "no"].includes(value.toLowerCase());
+}
+
+export function seoAuditIntervalDays() {
+  const days = Number(process.env.SEO_AUDIT_INTERVAL_DAYS || "7");
+  return Number.isFinite(days) && days > 0 ? days : 7;
+}
+
+export function seoAuditCooldownMs() {
+  const minutes = Number(process.env.SEO_AUDIT_COOLDOWN_MINUTES || "30");
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : 30) * 60_000;
+}
