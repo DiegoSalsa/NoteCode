@@ -91,7 +91,7 @@ export default function SeoOverviewPage() {
         description="Clicks, impresiones y estado de Search Console / Analytics por proyecto de empresa."
         actions={<SeoRangePills value={range} onChange={setRange} />}
       />
-      <SeoSubnav items={[{ href: "/seo", label: "Overview" }, { href: "/seo/integraciones", label: "Integraciones" }]} />
+      <SeoSubnav items={[{ href: "/seo", label: "Overview" }, { href: "/seo/integraciones", label: "Integraciones" }, { href: "/seo/alerts", label: "Alerts" }]} />
 
       {loading && <div className="grid animate-pulse gap-3 sm:grid-cols-2 xl:grid-cols-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-28 rounded-xl border border-white/10 bg-neutral-900" />)}</div>}
 

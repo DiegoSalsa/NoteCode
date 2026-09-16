@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { logEvent } from "@/lib/log";
 import { formatDateUTC, utcToday } from "@/lib/seo/dates";
-import { isGoogleConfigured, isSeoSyncEnabled, isSerpProviderConfigured, seoDiscoverStaleMs, seoSyncStaleMs } from "@/lib/seo/config";
+import { isGoogleConfigured, isSeoAuditEnabled, isSeoSyncEnabled, isSerpProviderConfigured, seoAuditIntervalDays, seoDiscoverStaleMs, seoSyncStaleMs } from "@/lib/seo/config";
 import { getActiveGoogleConnection } from "@/lib/seo/google-client";
 import { seoSchedulerKey, shouldSkipScheduledRun, type SeoScheduleTrigger } from "@/lib/seo/scheduler";
 import { beginJob, finishJob, syncDiscovery, syncSeoProject } from "@/lib/seo/sync";
 import { syncProjectRankings } from "@/lib/seo/rankings";
+import { processCrawlBatch, startProjectCrawl } from "@/lib/seo/crawler";
 
 export async function claimSeoSchedule(trigger: SeoScheduleTrigger) {
   const day = formatDateUTC(utcToday());
@@ -86,14 +87,45 @@ export async function runDueSeoJobs(trigger: "cron" | "manual" = "cron") {
     }
   }
 
+  const auditResults = [];
+  if (isSeoAuditEnabled()) {
+    const running = await prisma.seoCrawl.findMany({ where: { status: { in: ["queued", "running"] } }, take: 2, orderBy: { createdAt: "asc" } });
+    for (const crawl of running) {
+      const result = await processCrawlBatch(crawl.id);
+      auditResults.push({ crawlId: crawl.id, status: result?.status });
+    }
+    if (!running.length) {
+      const intervalMs = seoAuditIntervalDays() * 86_400_000;
+      const due = await prisma.seoProject.findMany({
+        where: {
+          enabled: true,
+          crawlEnabled: true,
+          project: { deletedAt: null, visibility: "COMPANY" },
+          OR: [{ lastAuditAt: null }, { lastAuditAt: { lt: new Date(Date.now() - intervalMs) } }],
+        },
+        take: 1,
+      });
+      for (const project of due) {
+        try {
+          const crawl = await startProjectCrawl(project.id, "cron");
+          const result = await processCrawlBatch(crawl.id);
+          auditResults.push({ crawlId: crawl.id, status: result?.status });
+        } catch (error) {
+          logEvent("error", "seo.audit.start_failed", { seoProjectId: project.id, message: error instanceof Error ? error.message : "audit failed" });
+        }
+      }
+    }
+  }
+
   if (lease.job) {
-    await finishJob(lease.job.id, "success", googleResults.length + rankingResults.length);
+    await finishJob(lease.job.id, "success", googleResults.length + rankingResults.length + auditResults.length);
   }
 
   logEvent("info", "seo.jobs.run", {
     trigger,
     google: googleResults.length,
     rankings: rankingResults.length,
+    audits: auditResults.length,
     duration: Date.now() - started,
     status: "success",
   });
@@ -104,6 +136,7 @@ export async function runDueSeoJobs(trigger: "cron" | "manual" = "cron") {
     synced: googleResults.length,
     rankings: rankingResults.length,
     rankingResults,
+    auditResults,
     results: googleResults,
     durationMs: Date.now() - started,
   };

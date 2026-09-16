@@ -123,7 +123,7 @@ function IntegracionesContent() {
         title="Integraciones"
         description="Una cuenta Google de PuroCode. NoteCode descubre las propiedades y tú confirmas el vínculo con cada proyecto."
       />
-      <SeoSubnav items={[{ href: "/seo", label: "Overview" }, { href: "/seo/integraciones", label: "Integraciones" }]} />
+      <SeoSubnav items={[{ href: "/seo", label: "Overview" }, { href: "/seo/integraciones", label: "Integraciones" }, { href: "/seo/alerts", label: "Alerts" }]} />
 
       {notice && <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-200">{notice}</p>}
       {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">{error}</p>}

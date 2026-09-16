@@ -41,6 +41,7 @@ export function projectSeoNav(projectId: string) {
     { href: `/seo/proyectos/${projectId}/analytics`, label: "Analytics" },
     { href: `/seo/proyectos/${projectId}/rankings`, label: "Rankings" },
     { href: `/seo/proyectos/${projectId}/competitors`, label: "Competitors" },
+    { href: `/seo/proyectos/${projectId}/audit`, label: "Site Audit" },
   ];
 }
 
