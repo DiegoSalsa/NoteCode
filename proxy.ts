@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
   "/api/webauthn/login/options",
   "/api/webauthn/login/verify",
   "/api/automations/run",
+  "/api/seo/jobs/run",
 ];
 const PUBLIC_PREFIXES = ["/portal/", "/api/portal/"];
 const SESSION_COOKIE_NAME = "notecode_session";
