@@ -3,6 +3,10 @@
     {
       "path": "/api/automations/run",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/seo/jobs/run",
+      "schedule": "30 12 * * *"
     }
   ]
 }
