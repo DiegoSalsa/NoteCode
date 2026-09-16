@@ -90,9 +90,10 @@ export async function syncGscRange(
   }
 
   if (includeDetails) {
-    const detailSets: Array<{ dimensions: string[]; kind: "query" | "page" | "device" | "country" }> = [
+    const detailSets: Array<{ dimensions: string[]; kind: "query" | "page" | "device" | "country" | "query_page" }> = [
       { dimensions: ["date", "query"], kind: "query" },
       { dimensions: ["date", "page"], kind: "page" },
+      { dimensions: ["date", "query", "page"], kind: "query_page" },
       { dimensions: ["date", "device"], kind: "device" },
       { dimensions: ["date", "country"], kind: "country" },
     ];
@@ -110,7 +111,16 @@ export async function syncGscRange(
         if (!dateKey || !dimension) continue;
         const date = parseGoogleDate(dateKey);
         const metrics = metricsOf(row);
-        if (set.kind === "query") {
+        if (set.kind === "query_page") {
+          const page = truncateDimension(row.keys?.[2] || "", 1024);
+          if (!page) continue;
+          const query = truncateDimension(dimension, 512);
+          await prisma.seoGscQueryPageDaily.upsert({
+            where: { seoProjectId_date_query_page: { seoProjectId, date, query, page } },
+            update: metrics,
+            create: { seoProjectId, date, query, page, ...metrics },
+          });
+        } else if (set.kind === "query") {
           const query = truncateDimension(dimension, 512);
           await prisma.seoGscQueryDaily.upsert({
             where: { seoProjectId_date_query: { seoProjectId, date, query } },
