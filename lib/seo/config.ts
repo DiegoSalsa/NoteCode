@@ -57,3 +57,49 @@ export function isSeoSyncEnabled() {
   if (value == null || value === "") return true;
   return !["0", "false", "off", "no"].includes(value.toLowerCase());
 }
+
+export function seoSerpProviderName() {
+  return (process.env.SEO_SERP_PROVIDER || "dataforseo").trim().toLowerCase();
+}
+
+export function isDataForSeoConfigured() {
+  return Boolean(process.env.DATAFORSEO_LOGIN?.trim() && process.env.DATAFORSEO_PASSWORD?.trim());
+}
+
+export function isSerpProviderConfigured() {
+  if (seoSerpProviderName() === "dataforseo") return isDataForSeoConfigured();
+  return false;
+}
+
+export function seoSerpDepth() {
+  const depth = Number(process.env.SEO_SERP_DEPTH || "100");
+  if (!Number.isFinite(depth)) return 100;
+  return Math.min(100, Math.max(10, Math.round(depth / 10) * 10));
+}
+
+export function seoSerpStoreLimit() {
+  const limit = Number(process.env.SEO_SERP_STORE_LIMIT || "30");
+  if (!Number.isFinite(limit)) return 30;
+  return Math.min(100, Math.max(10, Math.round(limit)));
+}
+
+export function seoSerpConcurrency() {
+  const value = Number(process.env.SEO_SERP_CONCURRENCY || "3");
+  if (!Number.isFinite(value)) return 3;
+  return Math.min(5, Math.max(1, Math.round(value)));
+}
+
+export function seoRankingsCooldownMs() {
+  const minutes = Number(process.env.SEO_RANKINGS_SYNC_COOLDOWN_MINUTES || "10");
+  const safe = Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+  return safe * 60_000;
+}
+
+export function seoLiveSerpUnitCostUsd() {
+  const value = Number(process.env.SEO_DATAFORSEO_LIVE_UNIT_USD || "0.002");
+  return Number.isFinite(value) && value >= 0 ? value : 0.002;
+}
+
+export function estimateLiveSerpCostUsd(depth = seoSerpDepth()) {
+  return seoLiveSerpUnitCostUsd() * Math.max(1, Math.ceil(depth / 10));
+}
