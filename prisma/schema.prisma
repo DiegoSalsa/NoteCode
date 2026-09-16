@@ -1534,6 +1534,15 @@ model SeoProject {
   lastRankingsSyncAt     DateTime?          @map("last_rankings_sync_at")
   lastRankingsSyncStatus String?            @map("last_rankings_sync_status")
   lastRankingsError      String?            @map("last_rankings_error")
+  crawlEnabled           Boolean            @default(true) @map("crawl_enabled")
+  crawlBaseUrl           String?            @map("crawl_base_url")
+  crawlMaxPages          Int                @default(500) @map("crawl_max_pages")
+  crawlMaxDepth          Int                @default(10) @map("crawl_max_depth")
+  crawlConcurrency       Int                @default(5) @map("crawl_concurrency")
+  crawlRespectRobots     Boolean            @default(true) @map("crawl_respect_robots")
+  lastAuditAt            DateTime?          @map("last_audit_at")
+  lastAuditStatus        String?            @map("last_audit_status")
+  lastHealthScore        Float?             @map("last_health_score")
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
   syncJobs               SeoSyncJob[]
@@ -1550,6 +1559,8 @@ model SeoProject {
   keywords               SeoKeyword[]
   competitors            SeoCompetitor[]
   serpSnapshots          SeoSerpSnapshot[]
+  crawls                 SeoCrawl[]
+  alerts                 SeoAlert[]
 
   @@index([enabled])
   @@index([gscPropertyId])
@@ -1777,11 +1788,13 @@ model SeoKeyword {
   currentUrl        String?          @map("current_url")
   lastSyncAt        DateTime?        @map("last_sync_at")
   lastSyncStatus    String           @default("pending") @map("last_sync_status")
-  lastError         String?          @map("last_error")
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
-  rankings          SeoRanking[]
-  snapshots         SeoSerpSnapshot[]
+  lastError          String?          @map("last_error")
+  pendingSerpTaskId  String?          @map("pending_serp_task_id")
+  pendingSerpTaskAt  DateTime?        @map("pending_serp_task_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  rankings           SeoRanking[]
+  snapshots          SeoSerpSnapshot[]
 
   @@unique([seoProjectId, normalizedKeyword, country, language, device, location], map: "seo_keywords_context_key")
   @@index([seoProjectId, active])
@@ -1868,4 +1881,157 @@ model SeoCompetitor {
   @@unique([seoProjectId, domain])
   @@index([seoProjectId, active])
   @@map("seo_competitors")
+}
+
+model SeoCrawl {
+  id              String           @id @default(uuid())
+  seoProjectId    String           @map("seo_project_id")
+  seoProject      SeoProject       @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  trigger         String           @default("manual")
+  status          String           @default("queued")
+  startedAt       DateTime?        @map("started_at")
+  finishedAt      DateTime?        @map("finished_at")
+  durationMs      Int?             @map("duration_ms")
+  pagesQueued     Int              @default(0) @map("pages_queued")
+  pagesCrawled    Int              @default(0) @map("pages_crawled")
+  pagesSucceeded  Int              @default(0) @map("pages_succeeded")
+  pagesFailed     Int              @default(0) @map("pages_failed")
+  issuesCritical  Int              @default(0) @map("issues_critical")
+  issuesHigh      Int              @default(0) @map("issues_high")
+  issuesMedium    Int              @default(0) @map("issues_medium")
+  issuesLow       Int              @default(0) @map("issues_low")
+  issuesInfo      Int              @default(0) @map("issues_info")
+  healthScore     Float?           @map("health_score")
+  config          Json             @default("{}")
+  checkpoint      Json             @default("{}")
+  robotsStatus    String?          @map("robots_status")
+  error           String?
+  createdAt       DateTime         @default(now()) @map("created_at")
+  pages           SeoCrawlPage[]
+  links           SeoCrawlLink[]
+  sitemaps        SeoCrawlSitemap[]
+  issues          SeoCrawlIssue[]
+  alerts          SeoAlert[]
+
+  @@index([seoProjectId, createdAt])
+  @@index([status, createdAt])
+  @@map("seo_crawls")
+}
+
+model SeoCrawlPage {
+  id               String   @id @default(uuid())
+  crawlId          String   @map("crawl_id")
+  crawl            SeoCrawl @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+  url              String
+  normalizedUrl    String   @map("normalized_url")
+  finalUrl         String?  @map("final_url")
+  statusCode       Int?     @map("status_code")
+  contentType      String?  @map("content_type")
+  responseTimeMs   Int?     @map("response_time_ms")
+  sizeBytes        Int?     @map("size_bytes")
+  depth            Int      @default(0)
+  discoveredFrom   String?  @map("discovered_from")
+  indexable        Boolean  @default(true)
+  indexableReasons String[] @default([]) @map("indexable_reasons")
+  robotsIndex      Boolean  @default(true) @map("robots_index")
+  robotsFollow     Boolean  @default(true) @map("robots_follow")
+  canonical        String?
+  title            String?
+  description      String?
+  h1               String?
+  h1Count          Int      @default(0) @map("h1_count")
+  wordCount        Int      @default(0) @map("word_count")
+  structuredTypes  String[] @default([]) @map("structured_types")
+  ogTitle          String?  @map("og_title")
+  ogImage          String?  @map("og_image")
+  twitterCard      String?  @map("twitter_card")
+  internalOut      Int      @default(0) @map("internal_out")
+  externalOut      Int      @default(0) @map("external_out")
+  internalIn       Int      @default(0) @map("internal_in")
+  redirectChain    String[] @default([]) @map("redirect_chain")
+  contentHash      String?  @map("content_hash")
+  error            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  outgoing         SeoCrawlLink[] @relation("CrawlLinkFrom")
+
+  @@unique([crawlId, normalizedUrl])
+  @@index([crawlId, statusCode])
+  @@index([crawlId, indexable])
+  @@map("seo_crawl_pages")
+}
+
+model SeoCrawlLink {
+  id              String       @id @default(uuid())
+  crawlId         String       @map("crawl_id")
+  crawl           SeoCrawl     @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+  fromPageId      String?      @map("from_page_id")
+  fromPage        SeoCrawlPage? @relation("CrawlLinkFrom", fields: [fromPageId], references: [id], onDelete: SetNull)
+  fromUrl         String       @map("from_url")
+  toUrl           String       @map("to_url")
+  toNormalizedUrl String       @map("to_normalized_url")
+  internal        Boolean      @default(true)
+
+  @@index([crawlId, toNormalizedUrl])
+  @@index([fromPageId])
+  @@map("seo_crawl_links")
+}
+
+model SeoCrawlSitemap {
+  id        String   @id @default(uuid())
+  crawlId   String   @map("crawl_id")
+  crawl     SeoCrawl @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+  url       String
+  status    String
+  kind      String   @default("sitemap")
+  urlCount  Int      @default(0) @map("url_count")
+  error     String?
+
+  @@index([crawlId])
+  @@map("seo_crawl_sitemaps")
+}
+
+model SeoCrawlIssue {
+  id            String   @id @default(uuid())
+  crawlId       String   @map("crawl_id")
+  crawl         SeoCrawl @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+  seoProjectId  String   @map("seo_project_id")
+  ruleKey       String   @map("rule_key")
+  severity      String
+  category      String
+  identityKey   String   @map("identity_key")
+  normalizedUrl String?  @map("normalized_url")
+  url           String?
+  message       String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([crawlId, identityKey])
+  @@index([crawlId, severity])
+  @@index([seoProjectId, ruleKey])
+  @@index([normalizedUrl])
+  @@map("seo_crawl_issues")
+}
+
+model SeoAlert {
+  id           String    @id @default(uuid())
+  seoProjectId String    @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  crawlId      String?   @map("crawl_id")
+  crawl        SeoCrawl? @relation(fields: [crawlId], references: [id], onDelete: SetNull)
+  type         String
+  severity     String
+  identityKey  String    @map("identity_key")
+  title        String
+  message      String
+  status       String    @default("open")
+  url          String?
+  ruleKey      String?   @map("rule_key")
+  taskId       String?   @map("task_id")
+  firstSeenAt  DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime  @default(now()) @map("last_seen_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([seoProjectId, status, createdAt])
+  @@index([seoProjectId, identityKey])
+  @@index([taskId])
+  @@map("seo_alerts")
 }
