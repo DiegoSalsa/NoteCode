@@ -65,11 +65,29 @@ prisma/migrations-manual/20260728_persistent_client_portal.sql
 prisma/migrations-manual/20260728_erp_connection_audit.sql
 prisma/migrations-manual/20260824_personal_notes_projects.sql
 prisma/migrations-manual/20260831_workspace_integrity.sql
+prisma/migrations-manual/20260915_seo_module.sql
 ```
 
 The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.
 
 The 2026-08-31 script is additive: idempotency, logical delete, requirement codes, note history, ADRs and encryption key versions. It does not drop user rows.
+
+The 2026-09-15 script adds the SEO module tables (`seo_*`). It is additive and does not touch existing ERP rows. After applying it, run `npx prisma generate`.
+
+## SEO / Google
+
+Google OAuth is read-only. Add these Vercel env vars before using `/seo`:
+
+```text
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_REDIRECT_URI=https://<host>/api/seo/google/callback
+SEO_TOKEN_ENCRYPTION_KEY
+CRON_SECRET
+APP_URL
+```
+
+`SEO_TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes. If omitted, SEO tokens reuse `ENCRYPTION_KEY`. Redirect URI must match the Google Cloud client. Cron `GET /api/seo/jobs/run` uses the same `CRON_SECRET` as automations.
 
 ## Encryption key rotation
 
