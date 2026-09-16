@@ -66,6 +66,7 @@ prisma/migrations-manual/20260728_erp_connection_audit.sql
 prisma/migrations-manual/20260824_personal_notes_projects.sql
 prisma/migrations-manual/20260831_workspace_integrity.sql
 prisma/migrations-manual/20260915_seo_module.sql
+prisma/migrations-manual/20260915_seo_rankings.sql
 ```
 
 The ERP migration preserves the deprecated `project_credentials` table as `project_credentials_legacy`. The application never reads that table; active credentials use AES-256-GCM through the `credentials` table.
@@ -87,7 +88,17 @@ CRON_SECRET
 APP_URL
 ```
 
-`SEO_TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes. If omitted, SEO tokens reuse `ENCRYPTION_KEY`. Redirect URI must match the Google Cloud client. Cron `GET /api/seo/jobs/run` uses the same `CRON_SECRET` as automations.
+`SEO_TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes. If omitted, SEO tokens reuse `ENCRYPTION_KEY`. Redirect URI must match the Google Cloud client.
+
+SEO cron is **only** `GET /api/seo/jobs/run` (13:00 UTC). Automations no longer trigger SEO. Rank tracking also needs:
+
+```text
+SEO_SERP_PROVIDER=dataforseo
+DATAFORSEO_LOGIN
+DATAFORSEO_PASSWORD
+SEO_DATAFORSEO_DAILY_BUDGET_USD=2
+SEO_DATAFORSEO_MONTHLY_BUDGET_USD=10
+```
 
 ## Encryption key rotation
 

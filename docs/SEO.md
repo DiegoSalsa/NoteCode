@@ -4,6 +4,8 @@ Módulo interno de inteligencia SEO. En código el namespace es `seo` (`/seo`, `
 
 P0 cubre arquitectura, OAuth de Google, descubrimiento GSC/GA4, vínculo a `Project`, sync, histórico propio, overview y dashboard.
 
+P1A cubre keywords, rank tracking, DataForSEO, snapshots SERP, competidores y presupuestos.
+
 ## Arquitectura
 
 NoteCode no usa una carpeta `/modules`. El módulo sigue el patrón existente:
@@ -63,11 +65,12 @@ Productos internos (Puragenda, etc.) usan el mismo `Project` sin `Client` o con 
 
 Jobs:
 
-- Cron Vercel `GET /api/seo/jobs/run` con `Authorization: Bearer $CRON_SECRET` (12:30 UTC).
-- El cron existente `/api/automations/run` también dispara SEO para no depender de un cron extra.
-- Manual: botón Sincronizar en el dashboard del proyecto, o `POST /api/seo/jobs/run`.
+- **Un solo scheduler efectivo:** `GET /api/seo/jobs/run` con `Authorization: Bearer $CRON_SECRET` (13:00 UTC).
+- `/api/automations/run` ya **no** dispara SEO (evita doble ejecución y doble costo).
+- Manual: `POST /api/seo/jobs/run` (ADMIN/MANAGER) o sync por proyecto.
+- El lease diario `seo-scheduler:YYYY-MM-DD` impide que dos crons del mismo día ejecuten el lote. Un POST manual no queda bloqueado por ese lease, pero las SERPs ya guardadas hoy no se vuelven a pagar.
 
-Cada job guarda `status`, `startedAt`, `finishedAt`, `durationMs`, `error`, `recordsProcessed`, `idempotencyKey`.
+Cada job guarda `status`, `startedAt`, `finishedAt`, `durationMs`, `error`, `recordsProcessed`, `idempotencyKey`. Los jobs `update-rankings` también guardan keywords requested/skipped/success/failed y `estimatedCost`.
 
 ## Seguridad
 
@@ -79,13 +82,58 @@ Cada job guarda `status`, `startedAt`, `finishedAt`, `durationMs`, `error`, `rec
 
 ## Providers
 
-`lib/seo/providers/serp.ts` define `SerpProvider`. P0 no llama a DataForSEO. P1 implementará rankings y keyword research detrás de esa interfaz, con `seo_api_usage` para costo.
+Toda consulta SERP pasa por `getSerpProvider()` (`lib/seo/providers/index.ts`). El contrato está en `lib/seo/providers/serp.ts`. DataForSEO es la primera implementación (`DataForSeoSerpProvider`).
 
-Para agregar otro provider:
+```text
+SEO → SerpProvider → DataForSeoSerpProvider
+POST https://api.dataforseo.com/v3/serp/google/organic/live/advanced
+```
 
-1. Implementa `SerpProvider`.
-2. Registra llamadas en `SeoApiUsage`.
-3. No importes el SDK del vendor desde páginas o APIs de dashboard; pasa por `lib/seo/providers`.
+Setup:
+
+```text
+SEO_SERP_PROVIDER=dataforseo
+DATAFORSEO_LOGIN=
+DATAFORSEO_PASSWORD=
+SEO_DATAFORSEO_DAILY_BUDGET_USD=2
+SEO_DATAFORSEO_MONTHLY_BUDGET_USD=10
+SEO_SERP_DEPTH=100
+SEO_SERP_CONCURRENCY=3
+```
+
+Si faltan login/password la UI muestra **Proveedor SERP no configurado**. No hay datos simulados.
+
+Para agregar otro provider: implementa `SerpProvider`, no llames al vendor desde páginas.
+
+### Costos
+
+Live Google Organic se factura ~US$0.002 por cada 10 resultados. Con `SEO_SERP_DEPTH=100` una keyword cuesta ~US$0.02. 25 keywords/día ≈ US$0.50/día ≈ US$15/mes, por eso el budget mensual por defecto es US$10 y corta el job con `budget_exceeded`.
+
+Cada llamada pagada se registra en `seo_api_usage` (provider, endpoint, operation, requests, units, estimatedCost USD, status, duration, project).
+
+El botón **Actualizar posiciones** tiene cooldown (10 min) y no vuelve a pagar una keyword que ya tiene ranking del día UTC.
+
+### Rankings vs GSC
+
+- Rank tracker: posición observada en una SERP concreta (DataForSEO).
+- GSC: posición media ponderada por impresiones reales.
+- La UI los etiqueta por separado. Nunca son la misma métrica.
+
+### Dominio propio
+
+`normalizeDomain` quita protocolo, `www`, path y `sc-domain:`. Un resultado es propio si el hostname es igual al `primaryDomain` del proyecto o un subdominio de ese dominio. No se usa `includes()`.
+
+### Visibility
+
+Fórmula interna, no es una métrica de Google:
+
+`Visibility = 100 * Σ CTR-weight(position) / (trackedSERPs * CTR-weight(1))`
+
+Pesos en `lib/seo/visibility.ts`.
+
+### Competidores
+
+Manuales en `/seo/proyectos/:id/competitors`. Detectados a partir de snapshots (overlap ≥ 2 keywords), nunca auto-confirmados. Se excluyen el dominio propio y verticales grandes (Google, YouTube, etc.), ampliables con `SEO_COMPETITOR_EXCLUDE_DOMAINS`.
 
 ## Depurar syncs
 
@@ -100,6 +148,6 @@ P0 no inventa un score. El número ponderado por issues de auditoría llega en P
 
 ## Pendiente
 
-- P1: keywords, rankings, SERP provider, competidores, crawler, auditoría, alertas, tareas.
-- P2: keyword research, backlinks, content opportunities, reportes exportables, CWV.
+- P1B: crawler, Site Audit, SEO Health, alertas → tareas.
+- P2: keyword research (volumen/CPC), backlinks, content opportunities, reportes exportables, CWV.
 - P3: correlación GitHub, agente SEO, AEO / AI visibility.
