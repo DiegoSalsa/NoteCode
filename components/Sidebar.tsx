@@ -22,6 +22,7 @@ import {
   Sparkles,
   Trash2,
   User,
+  LineChart,
 } from "lucide-react";
 import { logout } from "@/app/actions/auth";
 import { prefetchJson } from "@/lib/client-cache";
@@ -34,6 +35,7 @@ const navItems = [
   { label: "Buscar", href: "/buscar", icon: Search },
   { label: "Papelera", href: "/papelera", icon: Trash2, cacheKey: "trash", api: "/api/trash" },
   { label: "Gestión", href: "/erp", icon: BriefcaseBusiness, cacheKey: "erp:projects", api: "/api/erp/projects" },
+  { label: "SEO", href: "/seo", icon: LineChart, cacheKey: "seo:overview:28d", api: "/api/seo/overview?range=28d" },
   { label: "Reportes", href: "/reportes", icon: BarChart3, roles: ["ADMIN", "MANAGER", "FINANCE"] },
   { label: "Actividad", href: "/notificaciones", icon: Bell, cacheKey: "erp:notifications", api: "/api/erp/notifications" },
   { label: "Notas", href: "/notas", icon: NotebookPen, cacheKey: "notes:::0:30", api: "/api/notes?q=&folder=&skip=0&take=30" },

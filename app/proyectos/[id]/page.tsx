@@ -28,6 +28,7 @@ import {
     Headphones,
     ReceiptText,
     Users,
+    LineChart,
 } from "lucide-react";
 
 type ProjectData = {
@@ -747,6 +748,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <StatusBadge status={project.status} />
+                        {!personalProject && (
+                            <Link
+                                href={`/seo/proyectos/${id}`}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-1.5 text-[12px] font-medium text-neutral-300 hover:bg-white/5 transition-colors"
+                            >
+                                <LineChart size={12} strokeWidth={1.5} />
+                                SEO
+                            </Link>
+                        )}
                         <button
                             type="button"
                             onClick={() => {
