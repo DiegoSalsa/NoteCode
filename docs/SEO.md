@@ -165,7 +165,19 @@ SERP: manual = Live; cron = Standard Queue (`SEO_SERP_MANUAL_MODE` / `SEO_SERP_S
 
 HTML no se guarda. Retención automática de links/páginas queda para más adelante.
 
+## Keyword research y Content intelligence (P2A)
+
+`KeywordResearchProvider` es independiente de `SerpProvider`. DataForSEO Labs: overview, suggestions, related. Questions se derivan de esas listas (no hay un tercer pago si ya están en cache).
+
+Cache persistente 30 días (`seo_keyword_research_cache`). Orden de fuentes: GSC → rankings/SERP locales → cache → API pagada. Budget DataForSEO compartido.
+
+Search Volume ≠ GSC Impressions. La UI lo etiqueta.
+
+Opportunity score (0–100, no es Health): ver `lib/seo/opportunity-score.ts`. Confidence LOW/MEDIUM/HIGH según impresiones y días. Cannibalization exige ≥5 días y ≥10 impresiones por URL. Decay exige caída ≥30% y ≥20 clicks absolutos, con mínimo 50 clicks o 500 impr. previas.
+
+Keyword gap usa solo SERPs trackeadas de competidores confirmados.
+
 ## Pendiente
 
-- P2: keyword research, backlinks, content, reportes, CWV, rendered crawl.
-- P3: correlación GitHub, agente SEO, AEO / AI visibility.
+- P2B: backlinks, CWV avanzado, reportes PDF.
+- P3: GitHub correlation, agente SEO, AEO / AI visibility.
