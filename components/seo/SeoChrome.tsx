@@ -34,12 +34,25 @@ export function SeoHeader({
   );
 }
 
+export function projectSeoNav(projectId: string) {
+  return [
+    { href: `/seo/proyectos/${projectId}`, label: "Dashboard" },
+    { href: `/seo/proyectos/${projectId}/search-console`, label: "Search Console" },
+    { href: `/seo/proyectos/${projectId}/analytics`, label: "Analytics" },
+    { href: `/seo/proyectos/${projectId}/rankings`, label: "Rankings" },
+    { href: `/seo/proyectos/${projectId}/competitors`, label: "Competitors" },
+  ];
+}
+
 export function SeoSubnav({ items }: { items: Array<{ href: string; label: string }> }) {
   const pathname = usePathname();
+  const match = items
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0];
   return (
     <nav className="flex gap-1 overflow-x-auto border-b border-white/10">
       {items.map((item) => {
-        const active = pathname === item.href;
+        const active = match?.href === item.href;
         return (
           <Link
             key={item.href}

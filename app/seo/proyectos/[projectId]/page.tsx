@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { SeoHeader, SeoKpi, SeoRangePills, SeoState, SeoSubnav } from "@/components/seo/SeoChrome";
+import { SeoHeader, SeoKpi, SeoRangePills, SeoState, SeoSubnav, projectSeoNav } from "@/components/seo/SeoChrome";
 import SeoSparkline from "@/components/seo/SeoSparkline";
 import { formatDateTime, formatDecimal, formatInt, formatPercent } from "@/lib/seo/format";
 import type { SeoRangeKey } from "@/lib/seo/dates";
@@ -79,11 +79,7 @@ export default function SeoProjectDashboard({ params }: { params: Promise<{ proj
     await load();
   }
 
-  const nav = [
-    { href: `/seo/proyectos/${projectId}`, label: "Dashboard" },
-    { href: `/seo/proyectos/${projectId}/search-console`, label: "Search Console" },
-    { href: `/seo/proyectos/${projectId}/analytics`, label: "Analytics" },
-  ];
+  const nav = projectSeoNav(projectId);
 
   return (
     <div className="mx-auto max-w-7xl space-y-7 px-4 py-7 sm:px-6 lg:px-8 lg:py-10">

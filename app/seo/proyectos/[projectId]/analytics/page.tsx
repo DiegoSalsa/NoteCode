@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
-import { SeoHeader, SeoKpi, SeoRangePills, SeoState, SeoSubnav } from "@/components/seo/SeoChrome";
+import { SeoHeader, SeoKpi, SeoRangePills, SeoState, SeoSubnav, projectSeoNav } from "@/components/seo/SeoChrome";
 import SeoSparkline from "@/components/seo/SeoSparkline";
 import { formatInt, formatPercent } from "@/lib/seo/format";
 import type { SeoRangeKey } from "@/lib/seo/dates";
@@ -53,12 +53,7 @@ export default function AnalyticsPage({ params }: { params: Promise<{ projectId:
         description="Users, sessions, organic y landings. Field data de GA4, no lab data."
         actions={<SeoRangePills value={range} onChange={setRange} />}
       />
-      <SeoSubnav items={[
-        { href: "/seo", label: "Portafolio" },
-        { href: `/seo/proyectos/${projectId}`, label: "Dashboard" },
-        { href: `/seo/proyectos/${projectId}/search-console`, label: "Search Console" },
-        { href: `/seo/proyectos/${projectId}/analytics`, label: "Analytics" },
-      ]} />
+      <SeoSubnav items={[{ href: "/seo", label: "Portafolio" }, ...projectSeoNav(projectId)]} />
 
       {error && <SeoState tone="error" title="Error" description={error} />}
       {loading && <div className="h-48 animate-pulse rounded-xl border border-white/10 bg-neutral-900" />}

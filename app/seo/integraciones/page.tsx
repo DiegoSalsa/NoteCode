@@ -34,6 +34,12 @@ function IntegracionesContent() {
   const [notice, setNotice] = useState(searchParams.get("connected") ? "Google quedó conectado." : "");
   const [error, setError] = useState(searchParams.get("error") || "");
   const [canIntegrate, setCanIntegrate] = useState(false);
+  const [usage, setUsage] = useState<{
+    configured: boolean;
+    message: string | null;
+    spend: { dailyUsd: number; dailyRequests: number; monthlyUsd: number; monthlyRequests: number };
+    limits: { dailyUsd: number; monthlyUsd: number };
+  } | null>(null);
   const [linkFor, setLinkFor] = useState<Group | null>(null);
   const [projectId, setProjectId] = useState("");
   const [gscPropertyId, setGscPropertyId] = useState<string>("");
@@ -41,13 +47,15 @@ function IntegracionesContent() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [properties, status] = await Promise.all([
+    const [properties, status, usagePayload] = await Promise.all([
       fetch("/api/seo/properties").then((response) => response.json()),
       fetch("/api/seo/google/status").then((response) => response.json()),
+      fetch("/api/seo/usage").then((response) => response.json()),
     ]);
     if (properties.error) setError(properties.error);
     setData(properties);
     setCanIntegrate(Boolean(status?.permissions?.integrations));
+    setUsage(usagePayload);
     setLoading(false);
   }, []);
 
@@ -159,6 +167,33 @@ function IntegracionesContent() {
               )}
             </div>
           </div>
+        </section>
+      )}
+
+      {!loading && (
+        <section className="rounded-xl border border-white/10 bg-neutral-900 p-5">
+          <p className="text-sm font-semibold text-white">DataForSEO</p>
+          {!usage?.configured ? (
+            <p className="mt-2 text-sm text-amber-200">{usage?.message || "Proveedor SERP no configurado"}</p>
+          ) : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-3 text-sm">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-neutral-600">Hoy</p>
+                <p className="mt-1 text-neutral-200">{usage.spend.dailyRequests} requests</p>
+                <p className="text-neutral-500">US${usage.spend.dailyUsd.toFixed(4)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-neutral-600">Mes</p>
+                <p className="mt-1 text-neutral-200">{usage.spend.monthlyRequests} requests</p>
+                <p className="text-neutral-500">US${usage.spend.monthlyUsd.toFixed(4)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-neutral-600">Budget</p>
+                <p className="mt-1 text-neutral-200">US${usage.limits.dailyUsd.toFixed(2)} / día</p>
+                <p className="text-neutral-500">US${usage.limits.monthlyUsd.toFixed(2)} / mes</p>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
