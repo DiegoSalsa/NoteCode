@@ -3,8 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { notify, recordAudit } from "@/lib/audit";
 import { runDueAssistantRoutines } from "@/lib/assistant/routines";
-import { runDueSeoJobs } from "@/lib/seo/jobs";
-import { logEvent } from "@/lib/log";
 
 async function alreadyNotified(type: string, href: string) {
   const since = new Date(Date.now() - 20 * 3600000);
@@ -70,21 +68,11 @@ async function executeAutomations(forceRoutinesForUserId?: string) {
   }
 
   if (rules.length) await prisma.automationRule.updateMany({ where: { active: true }, data: { lastRunAt: now } });
-  let seo = null;
-  try {
-    seo = await runDueSeoJobs("cron");
-  } catch (error) {
-    logEvent("error", "seo.jobs.automation_failed", {
-      message: error instanceof Error ? error.message : "seo jobs failed",
-    });
-    seo = { ok: false, error: error instanceof Error ? error.message : "seo jobs failed" };
-  }
   await recordAudit({ action: "RUN", entityType: "Automation", entityId: "all", summary: `${created} notificaciones creadas` });
   return NextResponse.json({
     success: true,
     created,
     routines: routineRun,
-    seo,
     checked: invoices.length + tasks.length + projects.length + contracts.length + tickets.length + quotes.length + billingContracts.length + routineRun.checked,
   });
 }

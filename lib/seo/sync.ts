@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logEvent } from "@/lib/log";
 import { addUtcDays, formatDateUTC, gscSafeEndDate, utcToday } from "@/lib/seo/dates";
@@ -9,11 +10,11 @@ import { ga4ErrorMessage, syncGa4Range } from "@/lib/seo/ga4";
 
 export type SeoSyncTrigger = "manual" | "cron";
 
-function jobKey(parts: Array<string | null | undefined>) {
+export function jobKey(parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(":");
 }
 
-async function beginJob(input: {
+export async function beginJob(input: {
   type: string;
   trigger: SeoSyncTrigger;
   connectionId?: string | null;
@@ -33,42 +34,72 @@ async function beginJob(input: {
     }
   }
 
-  const job = existing
-    ? await prisma.seoSyncJob.update({
-        where: { id: existing.id },
-        data: {
-          status: "running",
-          trigger: input.trigger,
-          startedAt: new Date(),
-          finishedAt: null,
-          error: null,
-          recordsProcessed: 0,
-        },
-      })
-    : await prisma.seoSyncJob.create({
-        data: {
-          type: input.type,
-          trigger: input.trigger,
-          connectionId: input.connectionId ?? null,
-          seoProjectId: input.seoProjectId ?? null,
-          dateFrom: input.dateFrom ? new Date(`${input.dateFrom}T00:00:00.000Z`) : null,
-          dateTo: input.dateTo ? new Date(`${input.dateTo}T00:00:00.000Z`) : null,
-          status: "running",
-          startedAt: new Date(),
-          idempotencyKey: input.idempotencyKey,
-        },
-      });
-
-  return { skip: false as const, job };
+  try {
+    const job = existing
+      ? await prisma.seoSyncJob.update({
+          where: { id: existing.id },
+          data: {
+            status: "running",
+            trigger: input.trigger,
+            startedAt: new Date(),
+            finishedAt: null,
+            error: null,
+            recordsProcessed: 0,
+          },
+        })
+      : await prisma.seoSyncJob.create({
+          data: {
+            type: input.type,
+            trigger: input.trigger,
+            connectionId: input.connectionId ?? null,
+            seoProjectId: input.seoProjectId ?? null,
+            dateFrom: input.dateFrom ? new Date(`${input.dateFrom}T00:00:00.000Z`) : null,
+            dateTo: input.dateTo ? new Date(`${input.dateTo}T00:00:00.000Z`) : null,
+            status: "running",
+            startedAt: new Date(),
+            idempotencyKey: input.idempotencyKey,
+          },
+        });
+    return { skip: false as const, job };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const raced = await prisma.seoSyncJob.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      if (raced) return { skip: true as const, job: raced, reason: "already-running" };
+    }
+    throw error;
+  }
 }
 
-async function finishJob(jobId: string, status: "success" | "error", recordsProcessed: number, error?: string) {
+export async function finishJob(
+  jobId: string,
+  status: string,
+  recordsProcessed: number,
+  error?: string,
+  extra?: {
+    keywordsRequested?: number;
+    keywordsSkipped?: number;
+    keywordsSuccess?: number;
+    keywordsFailed?: number;
+    estimatedCost?: number;
+  },
+) {
   const job = await prisma.seoSyncJob.findUnique({ where: { id: jobId } });
   const finishedAt = new Date();
   const durationMs = job?.startedAt ? finishedAt.getTime() - job.startedAt.getTime() : null;
   return prisma.seoSyncJob.update({
     where: { id: jobId },
-    data: { status, recordsProcessed, error: error ?? null, finishedAt, durationMs },
+    data: {
+      status,
+      recordsProcessed,
+      error: error ?? null,
+      finishedAt,
+      durationMs,
+      ...(extra?.keywordsRequested != null ? { keywordsRequested: extra.keywordsRequested } : {}),
+      ...(extra?.keywordsSkipped != null ? { keywordsSkipped: extra.keywordsSkipped } : {}),
+      ...(extra?.keywordsSuccess != null ? { keywordsSuccess: extra.keywordsSuccess } : {}),
+      ...(extra?.keywordsFailed != null ? { keywordsFailed: extra.keywordsFailed } : {}),
+      ...(extra?.estimatedCost != null ? { estimatedCost: extra.estimatedCost } : {}),
+    },
   });
 }
 

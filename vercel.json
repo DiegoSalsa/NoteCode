@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/seo/jobs/run",
-      "schedule": "30 12 * * *"
+      "schedule": "0 13 * * *"
     }
   ]
 }
