@@ -10,6 +10,7 @@ import { loadCompanySeoProject } from "@/lib/seo/project-access";
 type Params = { params: Promise<{ projectId: string }> };
 
 export async function POST(request: NextRequest, { params }: Params) {
+  try {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   if (!canManageSeo(user)) return NextResponse.json({ error: "Sin permisos para ejecutar auditorías." }, { status: 403 });
@@ -22,4 +23,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const crawl = active ?? await startProjectCrawl(loaded.seoProject.id, "manual");
   const result = await processCrawlBatch(crawl.id);
   return NextResponse.json({ success: true, crawl: result });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo ejecutar la auditoría." }, { status: 500 });
+  }
 }

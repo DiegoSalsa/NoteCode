@@ -9,6 +9,7 @@ import { addUtcDays, utcToday } from "@/lib/seo/dates";
 type Params = { params: Promise<{ projectId: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
+  try {
   const user = await getCurrentUser();
   if (!canViewSeo(user)) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   const { projectId } = await params;
@@ -46,4 +47,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     })),
   }));
   return NextResponse.json({ crawl: latest, groups });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudieron cargar los issues." }, { status: 500 });
+  }
 }

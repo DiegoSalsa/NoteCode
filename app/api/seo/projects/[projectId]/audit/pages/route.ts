@@ -7,6 +7,7 @@ import { loadCompanySeoProject } from "@/lib/seo/project-access";
 type Params = { params: Promise<{ projectId: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
+  try {
   const user = await getCurrentUser();
   if (!canViewSeo(user)) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   const { projectId } = await params;
@@ -34,4 +35,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     crawlId: crawl.id,
     pages: pages.map((page) => ({ ...page, issues: issueMap.get(page.normalizedUrl) ?? [] })),
   });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudieron cargar las páginas." }, { status: 500 });
+  }
 }

@@ -16,12 +16,18 @@ export default function SiteAuditPage({ params }: { params: Promise<{ projectId:
   const [page, setPage] = useState<any>(null);
 
   const load = useCallback(async () => {
-    const [a, b, c] = await Promise.all([
-      fetch(`/api/seo/projects/${projectId}/audit`).then((r) => r.json()),
-      fetch(`/api/seo/projects/${projectId}/audit/issues`).then((r) => r.json()),
-      fetch(`/api/seo/projects/${projectId}/audit/pages`).then((r) => r.json()),
+    const [aRes, bRes, cRes] = await Promise.all([
+      fetch(`/api/seo/projects/${projectId}/audit`),
+      fetch(`/api/seo/projects/${projectId}/audit/issues`),
+      fetch(`/api/seo/projects/${projectId}/audit/pages`),
     ]);
-    if (a.error) setError(a.error);
+    const [a, b, c] = await Promise.all([
+      aRes.json().catch(() => null),
+      bRes.json().catch(() => null),
+      cRes.json().catch(() => null),
+    ]);
+    if (!aRes.ok || !a) setError(a?.error || "No se pudo cargar la auditoría.");
+    else if (a.error) setError(a.error);
     setOverview(a);
     setIssues(b);
     setPages(c);
@@ -34,7 +40,7 @@ export default function SiteAuditPage({ params }: { params: Promise<{ projectId:
     setError("");
     const response = await fetch(`/api/seo/projects/${projectId}/audit/run`, { method: "POST" });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) setError(payload?.error || "No se pudo ejecutar la auditoría.");
+    if (!response.ok || !payload) setError(payload?.error || "No se pudo ejecutar la auditoría.");
     setBusy(false);
     await load();
   }

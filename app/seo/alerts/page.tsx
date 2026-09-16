@@ -10,8 +10,13 @@ export default function SeoAlertsPage() {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const payload = await fetch("/api/seo/alerts").then((response) => response.json());
-    if (payload.error) setError(payload.error);
+    const response = await fetch("/api/seo/alerts");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) {
+      setError(payload?.error || "No se pudieron cargar las alertas.");
+      setAlerts([]);
+      return;
+    }
     setAlerts(payload.alerts || []);
   }, []);
   useEffect(() => { void load(); }, [load]);
