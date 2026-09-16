@@ -6,6 +6,8 @@ P0 cubre arquitectura, OAuth de Google, descubrimiento GSC/GA4, vínculo a `Proj
 
 P1A cubre keywords, rank tracking, DataForSEO, snapshots SERP, competidores y presupuestos.
 
+P1B cubre crawler HTTP propio, Site Audit, SEO Health, diffs, alertas y creación manual de `ProjectTask`.
+
 ## Arquitectura
 
 NoteCode no usa una carpeta `/modules`. El módulo sigue el patrón existente:
@@ -31,7 +33,9 @@ Permisos (roles actuales, no un RBAC paralelo):
    - `https://www.googleapis.com/auth/webmasters.readonly`
    - `https://www.googleapis.com/auth/analytics.readonly`
    - `openid email profile`
-3. Authorized redirect URI: `{APP_URL}/api/seo/google/callback`
+3. Authorized redirect URIs:
+   - Local: `http://localhost:3000/api/seo/google/callback`
+   - Producción: `https://notecode.purocode.com/api/seo/google/callback`
 4. Configura:
 
 ```text
@@ -40,6 +44,9 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/seo/google/callback
 SEO_TOKEN_ENCRYPTION_KEY=  # 32 bytes; si se omite se usa ENCRYPTION_KEY
 ```
+
+En Vercel usa `APP_URL=https://notecode.purocode.com` y
+`GOOGLE_REDIRECT_URI=https://notecode.purocode.com/api/seo/google/callback`.
 
 5. Entra a `/seo/integraciones` con un usuario `ADMIN` y pulsa **Conectar Google**.
 6. Autoriza la cuenta de PuroCode que tiene acceso a las propiedades.
@@ -142,12 +149,23 @@ Manuales en `/seo/proyectos/:id/competitors`. Detectados a partir de snapshots (
 3. `GET /api/seo/jobs` — últimos jobs.
 4. Logs JSON: eventos `seo.gsc.sync`, `seo.ga4.sync`, `seo.oauth.*`. Nunca contienen tokens.
 
-## SEO Health
+## Crawler y Site Audit (P1B)
 
-P0 no inventa un score. El número ponderado por issues de auditoría llega en P1 (`lib/seo` documentará la fórmula junto al crawler).
+HTTP crawler propio (`lib/seo/crawler.ts`). No usa DataForSEO OnPage ni headless browser.
+
+SSRF (`lib/seo/ssrf.ts`): bloquea localhost, loopback, RFC1918, link-local, metadata, IPv6 ULA, protocolos no HTTP(S) y userinfo. Resuelve DNS y valida cada IP. Los redirects se revalidan. No sale del hostname permitido (`www` ≡ apex; `blog.` no).
+
+Batches Vercel: `SEO_CRAWL_BATCH_PAGES` (20) + checkpoint. El cron reanuda crawls `running`.
+
+Health: `100 − penalty` (0–100). Por `ruleKey`: peso × (0.35 + 0.65×cobertura) × log de repetición, con cap. Ver `lib/seo/health.ts`.
+
+Alertas: dedupe por `identityKey` mientras están `open`. Health drop default 10 puntos. **Crear tarea** usa `ProjectTask`; no hay alta automática.
+
+SERP: manual = Live; cron = Standard Queue (`SEO_SERP_MANUAL_MODE` / `SEO_SERP_SCHEDULED_MODE`).
+
+HTML no se guarda. Retención automática de links/páginas queda para más adelante.
 
 ## Pendiente
 
-- P1B: crawler, Site Audit, SEO Health, alertas → tareas.
-- P2: keyword research (volumen/CPC), backlinks, content opportunities, reportes exportables, CWV.
+- P2: keyword research, backlinks, content, reportes, CWV, rendered crawl.
 - P3: correlación GitHub, agente SEO, AEO / AI visibility.
