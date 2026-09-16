@@ -7,6 +7,7 @@ import { seoSchedulerKey, shouldSkipScheduledRun, type SeoScheduleTrigger } from
 import { beginJob, finishJob, syncDiscovery, syncSeoProject } from "@/lib/seo/sync";
 import { syncProjectRankings } from "@/lib/seo/rankings";
 import { processCrawlBatch, startProjectCrawl } from "@/lib/seo/crawler";
+import { analyzeProjectOpportunities } from "@/lib/seo/analyze-opportunities";
 
 export async function claimSeoSchedule(trigger: SeoScheduleTrigger) {
   const day = formatDateUTC(utcToday());
@@ -117,8 +118,22 @@ export async function runDueSeoJobs(trigger: "cron" | "manual" = "cron") {
     }
   }
 
+  const opportunityResults = [];
+  const opportunityProjects = await prisma.seoProject.findMany({
+    where: { enabled: true, project: { deletedAt: null, visibility: "COMPANY" } },
+    select: { id: true },
+  });
+  for (const project of opportunityProjects) {
+    try {
+      const result = await analyzeProjectOpportunities(project.id);
+      opportunityResults.push({ seoProjectId: project.id, ...result });
+    } catch (error) {
+      logEvent("error", "seo.opportunities.failed", { seoProjectId: project.id, message: error instanceof Error ? error.message : "analyze failed" });
+    }
+  }
+
   if (lease.job) {
-    await finishJob(lease.job.id, "success", googleResults.length + rankingResults.length + auditResults.length);
+    await finishJob(lease.job.id, "success", googleResults.length + rankingResults.length + auditResults.length + opportunityResults.length);
   }
 
   logEvent("info", "seo.jobs.run", {
@@ -126,6 +141,7 @@ export async function runDueSeoJobs(trigger: "cron" | "manual" = "cron") {
     google: googleResults.length,
     rankings: rankingResults.length,
     audits: auditResults.length,
+    opportunities: opportunityResults.length,
     duration: Date.now() - started,
     status: "success",
   });
@@ -137,6 +153,7 @@ export async function runDueSeoJobs(trigger: "cron" | "manual" = "cron") {
     rankings: rankingResults.length,
     rankingResults,
     auditResults,
+    opportunityResults,
     results: googleResults,
     durationMs: Date.now() - started,
   };

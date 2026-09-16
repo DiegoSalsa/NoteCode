@@ -1561,6 +1561,8 @@ model SeoProject {
   serpSnapshots          SeoSerpSnapshot[]
   crawls                 SeoCrawl[]
   alerts                 SeoAlert[]
+  gscQueryPageDaily      SeoGscQueryPageDaily[]
+  opportunities          SeoOpportunity[]
 
   @@index([enabled])
   @@index([gscPropertyId])
@@ -1647,6 +1649,25 @@ model SeoGscPageDaily {
   @@index([seoProjectId, page])
   @@index([seoProjectId, clicks])
   @@map("seo_gsc_page_daily")
+}
+
+model SeoGscQueryPageDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  query        String
+  page         String
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date, query, page])
+  @@index([seoProjectId, date])
+  @@index([seoProjectId, query])
+  @@index([seoProjectId, page])
+  @@map("seo_gsc_query_page_daily")
 }
 
 model SeoGscDeviceDaily {
@@ -2034,4 +2055,53 @@ model SeoAlert {
   @@index([seoProjectId, identityKey])
   @@index([taskId])
   @@map("seo_alerts")
+}
+
+model SeoKeywordResearchCache {
+  id                 String   @id @default(uuid())
+  provider           String
+  dataset            String
+  keywordNormalized  String   @map("keyword_normalized")
+  country            String
+  language           String
+  fetchedAt          DateTime @default(now()) @map("fetched_at")
+  expiresAt          DateTime @map("expires_at")
+  estimatedCost      Float    @default(0) @map("estimated_cost")
+  payload            Json     @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, dataset, keywordNormalized, country, language])
+  @@index([expiresAt])
+  @@map("seo_keyword_research_cache")
+}
+
+model SeoOpportunity {
+  id              String    @id @default(uuid())
+  seoProjectId    String    @map("seo_project_id")
+  seoProject      SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  type            String
+  identityKey     String    @map("identity_key")
+  title           String
+  summary         String
+  url             String?
+  pageKey         String?   @map("page_key")
+  keyword         String?
+  score           Float     @default(0)
+  confidence      String    @default("MEDIUM")
+  status          String    @default("OPEN")
+  evidence        Json      @default("{}")
+  recommendation  String
+  taskId          String?   @map("task_id")
+  firstDetectedAt DateTime  @default(now()) @map("first_detected_at")
+  lastDetectedAt  DateTime  @default(now()) @map("last_detected_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([seoProjectId, identityKey])
+  @@index([seoProjectId, status, score])
+  @@index([seoProjectId, type])
+  @@index([pageKey])
+  @@index([taskId])
+  @@map("seo_opportunities")
 }

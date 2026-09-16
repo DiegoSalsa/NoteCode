@@ -75,6 +75,16 @@ export function normalizeKeyword(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+export function pageKey(value: string | null | undefined, fallbackHost?: string | null) {
+  const normalized = normalizeUrl(value, fallbackHost);
+  if (!normalized) return null;
+  return `${normalized.host}${normalized.path}`;
+}
+
+export function pathOnly(value: string | null | undefined, fallbackHost?: string | null) {
+  return normalizeUrl(value, fallbackHost)?.path ?? null;
+}
+
 export function keywordContextKey(input: {
   seoProjectId: string;
   normalizedKeyword: string;
