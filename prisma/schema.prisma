@@ -94,6 +94,7 @@ model Project {
   members          ProjectMember[]
   customFields     CustomField[]
   savedViews       SavedView[]
+  seoProject       SeoProject?
 
   @@index([clientId])
   @@index([ownerId])
@@ -1460,4 +1461,266 @@ model WorkspaceBackup {
 
   @@index([createdAt])
   @@map("workspace_backups")
+}
+
+// ---------------------------------------------------------------------------
+// SEO module (P0). Extends Project; does not duplicate Client/Organization.
+// Tokens live only in SeoGoogleConnection and are AES-256-GCM encrypted.
+// ---------------------------------------------------------------------------
+
+model SeoGoogleConnection {
+  id                    String   @id @default(uuid())
+  googleAccountEmail    String   @map("google_account_email")
+  googleAccountId       String?  @map("google_account_id")
+  scopes                String[] @default([])
+  accessTokenEncrypted  String   @map("access_token_encrypted")
+  refreshTokenEncrypted String?  @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime @map("token_expires_at")
+  tokenType             String   @default("Bearer") @map("token_type")
+  status                String   @default("connected")
+  lastError             String?  @map("last_error")
+  lastDiscoveredAt      DateTime? @map("last_discovered_at")
+  connectedByUserId     String   @map("connected_by_user_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  disconnectedAt        DateTime? @map("disconnected_at")
+  properties            SeoGoogleProperty[]
+  syncJobs              SeoSyncJob[]
+
+  @@index([status])
+  @@index([googleAccountEmail])
+  @@map("seo_google_connections")
+}
+
+model SeoGoogleProperty {
+  id               String               @id @default(uuid())
+  connectionId     String               @map("connection_id")
+  connection       SeoGoogleConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  kind             String
+  externalId       String               @map("external_id")
+  parentExternalId String?              @map("parent_external_id")
+  displayName      String               @map("display_name")
+  siteUrl          String?              @map("site_url")
+  hostname         String?
+  permissionLevel  String?              @map("permission_level")
+  metadata         Json                 @default("{}")
+  discoveredAt     DateTime             @default(now()) @map("discovered_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  gscProjects      SeoProject[]         @relation("SeoProjectGsc")
+  ga4Projects      SeoProject[]         @relation("SeoProjectGa4")
+
+  @@unique([kind, externalId])
+  @@index([connectionId, kind])
+  @@index([hostname])
+  @@map("seo_google_properties")
+}
+
+model SeoProject {
+  id                String             @id @default(uuid())
+  projectId         String             @unique @map("project_id")
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enabled           Boolean            @default(true)
+  primaryDomain     String?            @map("primary_domain")
+  gscPropertyId     String?            @map("gsc_property_id")
+  gscProperty       SeoGoogleProperty? @relation("SeoProjectGsc", fields: [gscPropertyId], references: [id], onDelete: SetNull)
+  ga4PropertyId     String?            @map("ga4_property_id")
+  ga4Property       SeoGoogleProperty? @relation("SeoProjectGa4", fields: [ga4PropertyId], references: [id], onDelete: SetNull)
+  lastGscSyncAt     DateTime?          @map("last_gsc_sync_at")
+  lastGa4SyncAt     DateTime?          @map("last_ga4_sync_at")
+  lastGscSyncStatus String?            @map("last_gsc_sync_status")
+  lastGa4SyncStatus String?            @map("last_ga4_sync_status")
+  lastGscError      String?            @map("last_gsc_error")
+  lastGa4Error      String?            @map("last_ga4_error")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  syncJobs          SeoSyncJob[]
+  gscSiteDaily      SeoGscSiteDaily[]
+  gscQueryDaily     SeoGscQueryDaily[]
+  gscPageDaily      SeoGscPageDaily[]
+  gscDeviceDaily    SeoGscDeviceDaily[]
+  gscCountryDaily   SeoGscCountryDaily[]
+  ga4SiteDaily      SeoGa4SiteDaily[]
+  ga4LandingDaily   SeoGa4LandingDaily[]
+  ga4SourceDaily    SeoGa4SourceDaily[]
+  apiUsage          SeoApiUsage[]
+
+  @@index([enabled])
+  @@index([gscPropertyId])
+  @@index([ga4PropertyId])
+  @@map("seo_projects")
+}
+
+model SeoSyncJob {
+  id               String               @id @default(uuid())
+  connectionId     String?              @map("connection_id")
+  connection       SeoGoogleConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  seoProjectId     String?              @map("seo_project_id")
+  seoProject       SeoProject?          @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  type             String
+  status           String               @default("pending")
+  trigger          String               @default("manual")
+  dateFrom         DateTime?            @map("date_from") @db.Date
+  dateTo           DateTime?            @map("date_to") @db.Date
+  startedAt        DateTime?            @map("started_at")
+  finishedAt       DateTime?            @map("finished_at")
+  durationMs       Int?                 @map("duration_ms")
+  recordsProcessed Int                  @default(0) @map("records_processed")
+  error            String?
+  idempotencyKey   String               @unique @map("idempotency_key")
+  createdAt        DateTime             @default(now()) @map("created_at")
+
+  @@index([seoProjectId, type, createdAt])
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@map("seo_sync_jobs")
+}
+
+model SeoGscSiteDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date])
+  @@index([seoProjectId, date])
+  @@map("seo_gsc_site_daily")
+}
+
+model SeoGscQueryDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  query        String
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date, query])
+  @@index([seoProjectId, date])
+  @@index([seoProjectId, query])
+  @@index([seoProjectId, clicks])
+  @@map("seo_gsc_query_daily")
+}
+
+model SeoGscPageDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  page         String
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date, page])
+  @@index([seoProjectId, date])
+  @@index([seoProjectId, page])
+  @@index([seoProjectId, clicks])
+  @@map("seo_gsc_page_daily")
+}
+
+model SeoGscDeviceDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  device       String
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date, device])
+  @@index([seoProjectId, date])
+  @@map("seo_gsc_device_daily")
+}
+
+model SeoGscCountryDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  country      String
+  clicks       Float      @default(0)
+  impressions  Float      @default(0)
+  ctr          Float      @default(0)
+  position     Float      @default(0)
+
+  @@unique([seoProjectId, date, country])
+  @@index([seoProjectId, date])
+  @@map("seo_gsc_country_daily")
+}
+
+model SeoGa4SiteDaily {
+  id               String     @id @default(uuid())
+  seoProjectId     String     @map("seo_project_id")
+  seoProject       SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date             DateTime   @db.Date
+  users            Float      @default(0)
+  sessions         Float      @default(0)
+  engagedSessions  Float      @default(0) @map("engaged_sessions")
+  engagementRate   Float      @default(0) @map("engagement_rate")
+  organicSessions  Float      @default(0) @map("organic_sessions")
+  eventCount       Float      @default(0) @map("event_count")
+  keyEvents        Float      @default(0) @map("key_events")
+
+  @@unique([seoProjectId, date])
+  @@index([seoProjectId, date])
+  @@map("seo_ga4_site_daily")
+}
+
+model SeoGa4LandingDaily {
+  id              String     @id @default(uuid())
+  seoProjectId    String     @map("seo_project_id")
+  seoProject      SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date            DateTime   @db.Date
+  landingPage     String     @map("landing_page")
+  users           Float      @default(0)
+  sessions        Float      @default(0)
+  engagedSessions Float      @default(0) @map("engaged_sessions")
+  engagementRate  Float      @default(0) @map("engagement_rate")
+  keyEvents       Float      @default(0) @map("key_events")
+
+  @@unique([seoProjectId, date, landingPage])
+  @@index([seoProjectId, date])
+  @@index([seoProjectId, landingPage])
+  @@map("seo_ga4_landing_daily")
+}
+
+model SeoGa4SourceDaily {
+  id           String     @id @default(uuid())
+  seoProjectId String     @map("seo_project_id")
+  seoProject   SeoProject @relation(fields: [seoProjectId], references: [id], onDelete: Cascade)
+  date         DateTime   @db.Date
+  source       String
+  medium       String
+  users        Float      @default(0)
+  sessions     Float      @default(0)
+
+  @@unique([seoProjectId, date, source, medium])
+  @@index([seoProjectId, date])
+  @@map("seo_ga4_source_daily")
+}
+
+model SeoApiUsage {
+  id            String      @id @default(uuid())
+  provider      String
+  endpoint      String
+  requests      Int         @default(1)
+  units         Int         @default(0)
+  estimatedCost Float       @default(0) @map("estimated_cost")
+  seoProjectId  String?     @map("seo_project_id")
+  seoProject    SeoProject? @relation(fields: [seoProjectId], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([provider, createdAt])
+  @@index([seoProjectId, createdAt])
+  @@map("seo_api_usage")
 }
