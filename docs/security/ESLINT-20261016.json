@@ -1,0 +1,447 @@
+{
+  "errors": 0,
+  "warnings": 63,
+  "remaining": [
+    {
+      "file": "app/api/clients/[id]/route.ts",
+      "line": 29,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/clients/[id]/route.ts",
+      "line": 48,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/clients/route.ts",
+      "line": 16,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/clients/route.ts",
+      "line": 38,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/invoices/route.ts",
+      "line": 4,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'invalidateCache' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/api/invoices/route.ts",
+      "line": 6,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'recordAudit' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/api/invoices/route.ts",
+      "line": 147,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/notes/[id]/route.ts",
+      "line": 37,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/notes/[id]/route.ts",
+      "line": 63,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/notes/route.ts",
+      "line": 71,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/notes/route.ts",
+      "line": 106,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/portal/[token]/documents/[id]/route.ts",
+      "line": 2,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'createHash' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/api/portal/[token]/route.ts",
+      "line": 2,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'createHash' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/api/portal/[token]/route.ts",
+      "line": 9,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'commercialFailure' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/api/projects/route.ts",
+      "line": 33,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'error' is defined but never used. Allowed unused caught errors must match /^_/u."
+    },
+    {
+      "file": "app/api/seo/projects/[projectId]/content/pages/route.ts",
+      "line": 33,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/api/seo/projects/[projectId]/content/pages/route.ts",
+      "line": 40,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/api/seo/projects/[projectId]/content/pages/route.ts",
+      "line": 41,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/api/seo/projects/[projectId]/content/pages/route.ts",
+      "line": 42,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/api/seo/projects/[projectId]/content/pages/route.ts",
+      "line": 43,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/correos/page.tsx",
+      "line": 75,
+      "rule": "react-hooks/exhaustive-deps",
+      "severity": 1,
+      "message": "React Hook useEffect has a missing dependency: 'loadMessages'. Either include it or remove the dependency array."
+    },
+    {
+      "file": "app/portal/[token]/cotizaciones/[quoteId]/page.tsx",
+      "line": 3,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'createHash' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/proyectos/[id]/page.tsx",
+      "line": 6,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'writeCachedJson' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/proyectos/[id]/page.tsx",
+      "line": 27,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'GripVertical' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/proyectos/[id]/page.tsx",
+      "line": 30,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'Headphones' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/proyectos/page.tsx",
+      "line": 12,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'ArrowUpRight' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/seo/alerts/page.tsx",
+      "line": 9,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 10,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 11,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 12,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 16,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 49,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 91,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 100,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 123,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/audit/page.tsx",
+      "line": 141,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/opportunities/page.tsx",
+      "line": 8,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/opportunities/page.tsx",
+      "line": 11,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/page.tsx",
+      "line": 10,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/page.tsx",
+      "line": 12,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/page.tsx",
+      "line": 64,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/page.tsx",
+      "line": 65,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/content/page.tsx",
+      "line": 66,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/rankings/[keywordId]/page.tsx",
+      "line": 7,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'formatDateTime' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/research/page.tsx",
+      "line": 12,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/research/page.tsx",
+      "line": 13,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "app/seo/proyectos/[projectId]/research/page.tsx",
+      "line": 80,
+      "rule": "@typescript-eslint/no-explicit-any",
+      "severity": 1,
+      "message": "Unexpected any. Specify a different type."
+    },
+    {
+      "file": "components/ClientPortal.tsx",
+      "line": 3,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'useMemo' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "components/ClientPortal.tsx",
+      "line": 28,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'money' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "components/GilbertoChat.tsx",
+      "line": 269,
+      "rule": "react-hooks/exhaustive-deps",
+      "severity": 1,
+      "message": "React Hook useEffect has a missing dependency: 'playDeepgramVoice'. Either include it or remove the dependency array."
+    },
+    {
+      "file": "components/QuoteDocument.tsx",
+      "line": 26,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'clp' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "components/TodayWorkspace.tsx",
+      "line": 62,
+      "rule": "react-hooks/exhaustive-deps",
+      "severity": 1,
+      "message": "React Hook useCallback has an unnecessary dependency: 'data'. Either exclude it or remove the dependency array."
+    },
+    {
+      "file": "e2e/commercial.spec.ts",
+      "line": 276,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'row' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "e2e/commercial.spec.ts",
+      "line": 289,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'accepted' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/ai/commercial-tools.ts",
+      "line": 13,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'quoteTotals' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/ai/tools.ts",
+      "line": 72,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'quoteItemSchema' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/ai/tools.ts",
+      "line": 158,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'nextQuoteNumber' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/commercial/flows.integration.test.ts",
+      "line": 633,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'client' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/seo/audit-rules.ts",
+      "line": 70,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'indexable' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/seo/crawler.ts",
+      "line": 7,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'isDisallowed' is defined but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "lib/seo/format.ts",
+      "line": 17,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'inverted' is assigned a value but never used. Allowed unused args must match /^_/u."
+    },
+    {
+      "file": "lib/seo/rankings.ts",
+      "line": 247,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'keyword' is assigned a value but never used. Allowed unused vars must match /^_/u."
+    },
+    {
+      "file": "public/sw.js",
+      "line": 1,
+      "rule": "@typescript-eslint/no-unused-vars",
+      "severity": 1,
+      "message": "'event' is defined but never used. Allowed unused args must match /^_/u."
+    }
+  ]
+}

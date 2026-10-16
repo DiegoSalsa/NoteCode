@@ -1,5 +1,7 @@
 # Revisión correctiva final — flujo comercial
 
+> El saneamiento posterior de dependencias, sus versiones, advisories y validaciones actualizadas están en [INFORME-SEGURIDAD-20261016.md](security/INFORME-SEGURIDAD-20261016.md). Los resultados de seguridad de este documento corresponden al HEAD histórico indicado abajo.
+
 Fecha: 16 de octubre de 2026. Rama: `refactor/flujo-comercial-unificado`.
 
 Código validado: `5472cca19ef39d73993c53014619886fa4280fe9`. Esta entrega añade después únicamente documentación; el HEAD final publicado se comunica en la entrega y puede verificarse con `git rev-parse HEAD` y `git ls-remote origin refs/heads/refactor/flujo-comercial-unificado`.
