@@ -23,7 +23,7 @@ type SummaryData = {
 };
 
 function StatusBadge({ status }: { status: string }) {
-  let style = "";
+  let style: string;
 
   switch (status) {
     case "En progreso":

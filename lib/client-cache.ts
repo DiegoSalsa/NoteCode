@@ -70,6 +70,7 @@ export function clearCachedJson(key: string) {
   try {
     window.sessionStorage.removeItem(storageKey(key));
   } catch {
+    // Storage can be unavailable; the in-memory cache was already cleared.
   }
 }
 
@@ -87,6 +88,7 @@ export function clearCachedJsonByPrefix(prefix: string) {
       if (key?.startsWith(fullPrefix)) window.sessionStorage.removeItem(key);
     }
   } catch {
+    // Storage can be unavailable; the in-memory cache was already cleared.
   }
 }
 

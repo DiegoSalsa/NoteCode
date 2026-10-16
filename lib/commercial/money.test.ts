@@ -36,7 +36,7 @@ describe("commercial money and states", () => {
   it("preserves legacy calculation without rounding or reinterpretation", () => {
     expect(
       quoteTotals(
-        [{ quantity: 1, unitPrice: 319327.73109243695 }],
+        [{ quantity: 1, unitPrice: Number("319327.73109243695") }],
         0,
         19,
         "CLP",

@@ -61,7 +61,7 @@ export async function getValidAccessToken(connection: SeoGoogleConnection) {
         data: { status: revoked ? "revoked" : "error", lastError: message },
       });
       logEvent("error", "seo.google.refresh_failed", { connectionId: connection.id, status: revoked ? "revoked" : "error" });
-      throw new Error(revoked ? "Google revocó el acceso. Vuelve a conectar la cuenta." : message);
+      throw new Error(revoked ? "Google revocó el acceso. Vuelve a conectar la cuenta." : message, { cause: error });
     } finally {
       refreshLocks.delete(connection.id);
     }
