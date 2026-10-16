@@ -1,5 +1,7 @@
 # Flujo comercial unificado — informe de entrega
 
+> Informe de la entrega anterior, cerrada en `e0c32cd`. La revisión correctiva, validaciones actuales y condiciones de merge están en [FLUJO-COMERCIAL-REVISION-CORRECTIVA.md](FLUJO-COMERCIAL-REVISION-CORRECTIVA.md).
+
 Fecha: 2026-10-16. Rama: `refactor/flujo-comercial-unificado`. Base remota comprobada: `598822865f6c63f389247a0f7be55d60e19c6875`. Checkout: `C:/Users/diego/Desktop/NoteCode-commercial`.
 
 La implementación reúne proyecto, propuesta, decisión del cliente, acuerdo y cobros en un proceso compartido. No hubo merge, PR, despliegue, envío de correos, cobros reales ni acceso a producción. El checkout original sigue en `feature/seo-module` y conserva sus tres scripts sin seguimiento. `main` se mantuvo intacta.
