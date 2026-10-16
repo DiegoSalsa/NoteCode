@@ -107,7 +107,8 @@ Commits de implementación y validación:
 5. `e26e443` — conciliación al vincular proyectos y recuperación de borradores.
 6. `db14de5` — integración, navegador, migración y restauración.
 7. `1c93759` — protección del plan aceptado ante cambios sin revisión.
+8. `f25d0e7` — informe final y procedimiento de migración.
 
-El commit posterior de documentación cierra esta entrega. Su HEAD exacto y la publicación remota se indican en la respuesta final; también se obtienen con `git rev-parse HEAD` y `git log --oneline origin/main..HEAD`.
+El commit final de limpieza de formato y notas cierra esta entrega. Su HEAD exacto y la publicación remota se indican en la respuesta final; también se obtienen con `git rev-parse HEAD` y `git log --oneline origin/main..HEAD`.
 
 Antes de un merge seguro: revisar el diff y el SQL con el responsable de la base, ensayar sobre un clon de staging del esquema real, resolver qué históricos se incorporarán al modelo nuevo y planificar el despliegue coordinado descrito en la guía. No se hizo merge ni se creó PR. La rama de entrega queda con árbol limpio y publicada en origin, conservando main y el trabajo local previo.

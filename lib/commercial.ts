@@ -24,4 +24,3 @@ export async function assertProjectBelongsToClient(projectId?: string | null, cl
   }
   return project;
 }
-
