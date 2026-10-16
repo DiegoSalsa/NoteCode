@@ -12,6 +12,8 @@ type Invoice = {
     number: string;
     client: string;
     amount: number;
+    netAmount: number | null;
+    currency: string;
     taxRate: number;
     status: string;
     dueDate: string;
@@ -31,8 +33,8 @@ type InvoicesPayload = {
     total: number;
     summary: {
         totalAmount: number;
-        netAmount?: number;
-        vatAmount?: number;
+        netAmount?: number | null;
+        vatAmount?: number | null;
         pendingAmount: number;
         paidAmount: number;
         overdueAmount?: number;
@@ -68,7 +70,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function FinanzasPage() {
-    const cached = useCachedJson<InvoicesPayload>("invoices::0:30");
+    const [projectId, setProjectId] = useState("");
+    useEffect(() => { setProjectId(new URLSearchParams(window.location.search).get("projectId") || ""); }, []);
+    const cached = useCachedJson<InvoicesPayload>(`invoices:${projectId}::0:30`);
     const [invoices, setInvoices] = useState<Invoice[]>(() => asArray<Invoice>(cached?.items));
     const [loading, setLoading] = useState(!cached);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -100,8 +104,8 @@ export default function FinanzasPage() {
 
     const fetchInvoices = useCallback(async ({ append = false, skip = 0 } = {}) => {
         try {
-            const params = new URLSearchParams({ q: debouncedSearch, status: statusFilter, skip: String(skip), take: "30" });
-            const key = `invoices:${debouncedSearch}:${statusFilter}:${skip}:30`;
+            const params = new URLSearchParams({ q: debouncedSearch, status: statusFilter, skip: String(skip), take: "30", ...(projectId ? { projectId } : {}) });
+            const key = `invoices:${projectId}:${debouncedSearch}:${statusFilter}:${skip}:30`;
             const data = await fetchAndCacheJson<InvoicesPayload>(key, `/api/invoices?${params.toString()}`);
             const items = asArray<Invoice>(data.items);
             setError(null);
@@ -116,7 +120,7 @@ export default function FinanzasPage() {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [debouncedSearch, statusFilter]);
+    }, [debouncedSearch, statusFilter, projectId]);
 
     useEffect(() => {
         if (!invoices.length) setLoading(true);
@@ -161,27 +165,16 @@ export default function FinanzasPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            if (editing) {
-                await fetch(`/api/invoices/${editing.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        ...form,
-                        amount: parseFloat(form.amount),
-                        paidAt: form.status === "Pagado" ? new Date().toISOString() : null,
-                    }),
-                });
-            } else {
-                await fetch("/api/invoices", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
-                });
-            }
+            const response = await fetch(editing ? `/api/invoices/${editing.id}` : "/api/invoices", {
+                method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...form, amount: Number(form.amount), taxRate: Number(form.taxRate) }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error ?? "No se pudo guardar el documento.");
             setModalOpen(false);
             await fetchInvoices();
         } catch (err) {
-            console.error(err);
+            setError(err instanceof Error ? err.message : "No se pudo guardar.");
         } finally {
             setSaving(false);
         }
@@ -189,14 +182,15 @@ export default function FinanzasPage() {
 
     async function handleDelete(id: string) {
         if (!confirm("¿Eliminar esta factura?")) return;
-        await fetch(`/api/invoices/${id}`, { method: "DELETE" });
+        const response = await fetch(`/api/invoices/${id}`, { method: "DELETE" });
+        if (!response.ok) { const payload = await response.json(); setError(payload.error); return; }
         await fetchInvoices();
     }
 
     const filtered = invoices;
     const totalAmount = summary.totalAmount;
-    const netAmount = summary.netAmount ?? totalAmount / 1.19;
-    const vatAmount = summary.vatAmount ?? totalAmount - netAmount;
+    const netAmount = summary.netAmount;
+    const vatAmount = summary.vatAmount;
     const pendingAmount = summary.pendingAmount;
     const paidAmount = summary.paidAmount;
     const overdueAmount = summary.overdueAmount ?? 0;
@@ -249,8 +243,8 @@ export default function FinanzasPage() {
                             </div>
                             <span className="text-[12px] font-medium text-neutral-400">Neto sin IVA</span>
                         </div>
-                        <p className="text-2xl font-semibold tabular-nums text-neutral-100">${Math.round(netAmount).toLocaleString()}</p>
-                        <p className="mt-1 text-[11px] text-neutral-600">IVA 19%: ${Math.round(vatAmount).toLocaleString()}</p>
+                        <p className="text-2xl font-semibold tabular-nums text-neutral-100">{netAmount === null || netAmount === undefined ? "Por conciliar" : `$${Math.round(netAmount).toLocaleString("es-CL")}`}</p>
+                        <p className="mt-1 text-[11px] text-neutral-600">IVA: {vatAmount === null || vatAmount === undefined ? "Por conciliar" : `$${Math.round(vatAmount).toLocaleString("es-CL")}`}</p>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-neutral-900 px-5 py-4">
                         <div className="flex items-center gap-3 mb-2">
@@ -289,7 +283,7 @@ export default function FinanzasPage() {
                         <Search size={15} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
                         <input
                             type="text"
-                            placeholder="Buscar facturas..."
+                            placeholder="Buscar documentos internos de cobro (CLP)..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             className="w-full rounded-lg border border-white/10 bg-neutral-900 pl-10 pr-4 py-2.5 text-[14px] text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-white/20 transition-colors"
@@ -356,7 +350,7 @@ export default function FinanzasPage() {
                                     ${inv.amount.toLocaleString()}
                                 </span>
                                 <span className="text-[12px] text-neutral-600">
-                                    Neto: ${Math.round(inv.amount / 1.19).toLocaleString()}
+                                    Neto: {inv.netAmount === null ? "Sin tratamiento confirmado" : `$${Math.round(inv.netAmount).toLocaleString("es-CL")}`}
                                 </span>
                                 <StatusBadge status={inv.status} />
                                 <div className="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
@@ -442,7 +436,7 @@ export default function FinanzasPage() {
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Estado</label>
                                     <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
                                         className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors">
-                                        {STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                                        {STATUSES.filter(s => s === editing?.status || !["Pagado", "Parcial"].includes(s)).map((s) => (<option key={s} value={s}>{s}</option>))}
                                     </select>
                                 </div>
                             </div>

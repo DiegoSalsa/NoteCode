@@ -25,6 +25,9 @@ type Project = {
     description: string | null;
     status: string;
     agreedAmount: number;
+    saleNetAmount?: string | null;
+    saleTaxRate?: string | null;
+    commercialTerms?: string | null;
     budgetHours: number;
     budgetCost: number;
     startDate: string | null;
@@ -82,7 +85,7 @@ export default function ProyectosPage() {
     // Modal state
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Project | null>(null);
-    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
+    const [form, setForm] = useState({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", saleNetAmount: "", saleTaxRate: "19", commercialTerms: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
     const [createKey, setCreateKey] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
@@ -129,14 +132,14 @@ export default function ProyectosPage() {
 
     function openCreate() {
         setEditing(null);
-        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
+        setForm({ name: "", description: "", status: "En progreso", clientId: "", clientName: "", agreedAmount: "", saleNetAmount: "", saleTaxRate: "19", commercialTerms: "", budgetHours: "", budgetCost: "", startDate: "", targetDate: "", ownerId: "", template: "" });
         setCreateKey(crypto.randomUUID());
         setModalOpen(true);
     }
 
     function openEdit(p: Project) {
         setEditing(p);
-        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId || "", clientName: p.client?.name || "", agreedAmount: String(p.agreedAmount || ""), budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "", template: "" });
+        setForm({ name: p.name, description: p.description || "", status: p.status, clientId: p.clientId || "", clientName: p.client?.name || "", agreedAmount: String(p.agreedAmount || ""), saleNetAmount: p.saleNetAmount ?? "", saleTaxRate: p.saleTaxRate ?? "19", commercialTerms: p.commercialTerms ?? "", budgetHours: String(p.budgetHours || ""), budgetCost: String(p.budgetCost || ""), startDate: p.startDate?.slice(0, 10) || "", targetDate: p.targetDate?.slice(0, 10) || "", ownerId: p.ownerId || "", template: "" });
         setModalOpen(true);
     }
 
@@ -365,18 +368,19 @@ export default function ProyectosPage() {
                                 )}
                             </div>}
                             <div>
-                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">{scope === "personal" ? "Presupuesto personal ($)" : "Valor acordado ($)"}</label>
+                                <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">{scope === "personal" ? "Presupuesto personal ($)" : "Precio de venta neto (CLP, sin IVA)"}</label>
                                 <input
                                     required
                                     type="number"
                                     min="0"
-                                    step="0.01"
-                                    value={form.agreedAmount}
-                                    onChange={(e) => setForm({ ...form, agreedAmount: e.target.value })}
+                                    step="1"
+                                    value={scope === "personal" ? form.agreedAmount : form.saleNetAmount}
+                                    onChange={(e) => setForm({ ...form, [scope === "personal" ? "agreedAmount" : "saleNetAmount"]: e.target.value })}
                                     className="w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-[14px] text-neutral-100 outline-none focus:border-white/20 transition-colors"
                                     placeholder="Ej: 1500000"
                                 />
                             </div>
+                            {scope === "company" && <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs text-neutral-400">IVA (%)<input aria-label="IVA del proyecto" type="number" min="0" max="100" step="0.01" value={form.saleTaxRate} onChange={e => setForm({ ...form, saleTaxRate: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white" /></label><label className="text-xs text-neutral-400">Condiciones comerciales<textarea aria-label="Condiciones comerciales" value={form.commercialTerms} onChange={e => setForm({ ...form, commercialTerms: e.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-neutral-950 px-3 py-2 text-sm text-white" /></label></div>}
                             <div className="grid gap-4 sm:grid-cols-2">
                                 {scope === "company" && <div>
                                     <label className="block text-[13px] font-medium text-neutral-300 mb-1.5">Responsable</label>

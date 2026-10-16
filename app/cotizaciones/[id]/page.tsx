@@ -1,3 +1,4 @@
+import { publicQuote, quoteInclude } from "@/lib/commercial/quotes";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -9,21 +10,9 @@ export default async function QuotePrintPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const quote = await prisma.quote.findUnique({
     where: { id, deletedAt: null },
-    include: { client: true, items: { orderBy: { sortOrder: "asc" } } },
+    include: quoteInclude,
   });
   if (!quote) notFound();
 
-  return <QuoteDocument quote={{
-    id: quote.id,
-    number: quote.number,
-    title: quote.title,
-    status: quote.status,
-    createdAt: quote.createdAt.toISOString(),
-    validUntil: quote.validUntil?.toISOString() ?? null,
-    taxRate: quote.taxRate,
-    discount: quote.discount,
-    terms: quote.terms,
-    client: { name: quote.client.name, company: quote.client.company, email: quote.client.email },
-    items: quote.items.map((item) => ({ id: item.id, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
-  }} backHref="/erp?tab=cotizaciones" />;
+  return <QuoteDocument quote={publicQuote(quote)} backHref={quote.projectId ? `/proyectos/${quote.projectId}` : "/erp?tab=cotizaciones"} />;
 }

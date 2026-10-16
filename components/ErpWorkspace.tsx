@@ -9,6 +9,9 @@ import {
   ShieldCheck, ShoppingCart, SlidersHorizontal, Trash2, UserRound, UsersRound, WalletCards, X,
 } from "lucide-react";
 
+import QuoteEditor, { type ProposalForm } from "@/components/commercial/QuoteEditor";
+import { canTransition } from "@/lib/commercial/validation";
+
 type Item = Record<string, unknown> & { id: string };
 type Option = { id: string; name?: string; title?: string; number?: string; client?: string; amount?: number; status?: string; projectId?: string; clientId?: string };
 type Options = {
@@ -288,6 +291,8 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modal, setModal] = useState(false);
+  const [proposalEditor, setProposalEditor] = useState<{ initial: ProposalForm; id?: string } | null>(null);
+  const [paymentRequestKey, setPaymentRequestKey] = useState("");
   const [form, setForm] = useState<Record<string, string | number | boolean>>({});
   const [quoteLines, setQuoteLines] = useState([{ description: "", quantity: 1, unitPrice: 0 }]);
   const [journalLines, setJournalLines] = useState([
@@ -414,6 +419,11 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
 
   async function openCreate() {
     if (!module) return;
+    if (module.resource === "quotes") {
+      const initial = projectId ? await fetch(`/api/commercial/prefill?projectId=${projectId}`).then(r => r.json()) : { clientId: "", title: "", currency: "CLP", taxRate: 19, discount: 0, items: [{ description: "", quantity: 1, unitPrice: 0 }] };
+      setProposalEditor({ initial }); return;
+    }
+    if (module.resource === "payments") setPaymentRequestKey(crypto.randomUUID());
     if (module.fields.some((field) => field.source)) await loadOptions();
     const initial: Record<string, string | number | boolean> = {};
     for (const field of module.fields) {
@@ -442,7 +452,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
         ? { ...form, items: quoteLines }
         : module.resource === "journal"
           ? { ...form, lines: journalLines }
-          : form;
+          : module.resource === "payments" ? { ...form, amount: Number(form.amount), requestKey: paymentRequestKey } : form;
       const response = await fetch(`/api/erp/${module.resource}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
@@ -460,6 +470,11 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
 
   async function update(resource: string, id: string, payload: Record<string, unknown>) {
     setError("");
+    if (resource === "quotes" && payload.action === "edit") { const item = items.find(i => i.id === id); if (item) setProposalEditor({ initial: item as unknown as ProposalForm, id }); return; }
+    if (resource === "opportunities" && payload.action === "prepare") {
+      const r = await fetch(`/api/commercial/prefill?opportunityId=${id}`); const v = await r.json();
+      if (!r.ok) { setError(v.error); return; } setProposalEditor({ initial: v }); return;
+    }
     const response = await fetch(`/api/erp/${resource}/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
@@ -665,6 +680,7 @@ export default function ErpWorkspace({ currentUser }: { currentUser: { id: strin
         </section>
       )}
 
+      {proposalEditor && <QuoteEditor initial={proposalEditor.initial} quoteId={proposalEditor.id} onClose={() => setProposalEditor(null)} onSaved={async () => { dataCache.current.clear(); await Promise.all([load(true), loadOptions(true)]); }} />}
       {modal && module && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm sm:items-center">
           <form onSubmit={submit} className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/10 bg-neutral-900 p-5 shadow-2xl sm:p-6">
@@ -819,7 +835,7 @@ function ProjectPortfolio({ items, onOpenModule }: { items: Item[]; onOpenModule
                 <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg border border-white/5 bg-neutral-950 p-3">
                   <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Costos</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.totalCost ?? 0)}</p></div>
                   <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Cobrado</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.collected ?? 0)}</p></div>
-                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Margen</p><p className={`mt-1 text-xs font-medium ${(financials.margin ?? 0) < 0 ? "text-red-300" : "text-emerald-300"}`}>{money.format(financials.margin ?? 0)}</p></div>
+                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Margen</p><p className={`mt-1 text-xs font-medium ${(financials.margin ?? 0) < 0 ? "text-red-300" : "text-emerald-300"}`}>{financials.margin === null ? "Sin neto confirmado" : money.format(financials.margin ?? 0)}</p></div>
                 </div>
               )}
               <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -944,10 +960,13 @@ function ModuleActions({ resource, item, onUpdate, onRemove, onTicketComment }: 
   return (
     <div className="flex shrink-0 items-center gap-2">
       {resource === "quotes" && <>
-        <select value={String(item.status)} onChange={(event) => onUpdate(resource, item.id, { status: event.target.value })} className="rounded-md border border-white/10 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-400"><option>Borrador</option><option>Enviada</option><option>Aprobada</option><option>Rechazada</option><option>Vencida</option></select>
-        {!item.projectId && <button onClick={() => onUpdate(resource, item.id, { action: "convert" })} className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-300">Crear proyecto</button>}
+        <select aria-label="Estado de propuesta" value={String(item.status)} onChange={(event) => onUpdate(resource, item.id, { status: event.target.value, contentHash: item.contentHash, editVersion: item.editVersion })} className="rounded-md border border-white/10 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-400">{["Borrador", "Enviada", "Aprobada", "Cambios solicitados", "Rechazada", "Vencida", "Reemplazada"].filter(state => canTransition(String(item.status), state)).map(state => <option key={state}>{state}</option>)}</select>
+        {item.status === "Borrador" && <button onClick={() => onUpdate(resource, item.id, { action: "edit" })} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Editar borrador</button>}
+        {item.status !== "Borrador" && <button onClick={() => onUpdate(resource, item.id, { action: "revision" })} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Nueva revisión</button>}
+        {!item.projectId && item.status === "Aprobada" && <><button onClick={() => onUpdate(resource, item.id, { action: "convert" })} className="rounded-md border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-300">Crear proyecto</button><button onClick={() => { const projectId = prompt("ID del proyecto existente del mismo cliente"); if (projectId) onUpdate(resource, item.id, { action: "convert", projectId }); }} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300">Vincular proyecto</button></>}
         <a href={`/cotizaciones/${item.id}`} target="_blank" className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Ver propuesta</a>
       </>}
+      {resource === "opportunities" && <button onClick={() => onUpdate(resource, item.id, { action: "prepare" })} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300">Preparar propuesta</button>}
       {resource === "time-entries" && <button onClick={() => onUpdate(resource, item.id, { approved: !item.approved })} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">{item.approved ? "Desaprobar" : "Aprobar"}</button>}
       {resource === "tickets" && <select value={String(item.status)} onChange={(event) => onUpdate(resource, item.id, { status: event.target.value })} className="rounded-md border border-white/10 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-400"><option>Abierto</option><option>En progreso</option><option>Esperando cliente</option><option>Resuelto</option><option>Cerrado</option></select>}
       {resource === "tickets" && onTicketComment && <button onClick={() => onTicketComment(item.id)} className="rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-neutral-400">Responder</button>}

@@ -1,3 +1,4 @@
+import { projectEconomics } from "@/lib/commercial/economics";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, Clock3, Gauge, TrendingUp } from "lucide-react";
@@ -48,9 +49,10 @@ async function ReportsContent() {
     60_000,
     () => Promise.all([
       prisma.project.findMany({
-        where: { deletedAt: null, visibility: "COMPANY" },
+        where: { deletedAt: null, visibility: "COMPANY", currency: "CLP" },
         orderBy: { updatedAt: "desc" },
         include: {
+          currentAgreement: { select: { netAmount: true } },
           client: { select: { name: true } },
           timeEntries: { include: { teamMember: { select: { hourlyCost: true, billableRate: true } } } },
           expenses: { where: { deletedAt: null } },
@@ -58,8 +60,8 @@ async function ReportsContent() {
         },
       }),
       prisma.opportunity.groupBy({ by: ["stage"], where: { deletedAt: null }, _sum: { value: true }, _count: { id: true } }),
-      prisma.payment.findMany({ where: { paidAt: { gte: since } }, select: { amount: true, paidAt: true } }),
-      prisma.expense.findMany({ where: { deletedAt: null, date: { gte: since } }, select: { amount: true, date: true } }),
+      prisma.payment.findMany({ where: { paidAt: { gte: since }, currency: "CLP" }, select: { amount: true, paidAt: true } }),
+      prisma.expense.findMany({ where: { deletedAt: null, date: { gte: since }, currency: "CLP" }, select: { amount: true, date: true } }),
       prisma.teamMember.findMany({
         where: { deletedAt: null, active: true },
         orderBy: { name: "asc" },
@@ -69,18 +71,13 @@ async function ReportsContent() {
   );
 
   const profitability = projects.map((project) => {
-    const hours = project.timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
-    const laborCost = project.timeEntries.reduce((sum, entry) => sum + entry.hours * entry.teamMember.hourlyCost, 0);
-    const expenseCost = project.expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const invoiced = project.invoices.reduce((sum, invoice) => sum + invoice.amount, 0);
-    const collected = project.invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0), 0);
-    const totalCost = laborCost + expenseCost;
-    const revenueBase = invoiced || project.agreedAmount;
-    return { ...project, client: project.client ?? { name: "Sin cliente" }, hours, laborCost, expenseCost, totalCost, invoiced, collected, margin: revenueBase - totalCost, marginRate: revenueBase > 0 ? (revenueBase - totalCost) / revenueBase : 0 };
+    const economic = projectEconomics({ ...project, acceptedNet: project.currentAgreement ? Number(project.currentAgreement.netAmount) : null });
+    return { ...project, ...economic, client: project.client ?? { name: "Sin cliente" }, marginRate: economic.acceptedNet && economic.margin !== null ? economic.margin / economic.acceptedNet : null };
+
   });
 
   const totals = profitability.reduce((result, project) => ({
-    revenue: result.revenue + (project.invoiced || project.agreedAmount),
+    revenue: result.revenue + (project.acceptedNet ?? 0),
     collected: result.collected + project.collected,
     cost: result.cost + project.totalCost,
     hours: result.hours + project.hours,
@@ -103,9 +100,9 @@ async function ReportsContent() {
       <header><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500"><BarChart3 size={14} /> Inteligencia de negocio</div><h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">Reportes y rentabilidad</h1><p className="mt-1 text-sm text-neutral-500">Ventas, caja, costos, capacidad y margen por proyecto.</p></header>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric icon={TrendingUp} label="Ingresos comprometidos" value={clp.format(totals.revenue)} detail={`Cobrado ${clp.format(totals.collected)}`} />
+        <Metric icon={TrendingUp} label="Precio neto aceptado · CLP" value={clp.format(totals.revenue)} detail={`Cobrado ${clp.format(totals.collected)}`} />
         <Metric icon={ArrowDownRight} label="Costos registrados" value={clp.format(totals.cost)} detail="Horas + gastos de proyecto" />
-        <Metric icon={ArrowUpRight} label="Margen estimado" value={clp.format(totals.revenue - totals.cost)} detail={`${totals.revenue ? numeric.format((totals.revenue - totals.cost) / totals.revenue * 100) : 0}% sobre ingresos`} />
+        <Metric icon={ArrowUpRight} label="Margen de acuerdos confirmados" value={clp.format(profitability.reduce((sum, project) => sum + (project.margin ?? 0), 0))} detail="Solo proyectos con precio neto aceptado" />
         <Metric icon={Clock3} label="Horas registradas" value={`${numeric.format(totals.hours)} h`} detail={`${team.length} personas activas`} />
       </div>
 
@@ -120,7 +117,7 @@ async function ReportsContent() {
         <section className="rounded-xl border border-white/10 bg-neutral-900 p-5"><h2 className="text-sm font-semibold text-white">Embudo comercial</h2><div className="mt-5 space-y-3">{opportunities.map((stage) => { const max = Math.max(1, ...opportunities.map((item) => item._count.id)); return <div key={stage.stage}><div className="flex items-center justify-between text-xs"><span className="text-neutral-300">{stage.stage}</span><span className="text-neutral-500">{stage._count.id} · {clp.format(stage._sum.value ?? 0)}</span></div><div className="mt-1.5 h-1.5 rounded-full bg-neutral-800"><div className="h-full rounded-full bg-sky-400/70" style={{ width: `${stage._count.id / max * 100}%` }} /></div></div>})}{!opportunities.length && <p className="text-sm text-neutral-500">Aún no hay oportunidades.</p>}</div></section>
       </div>
 
-      <section><div className="flex items-end justify-between"><div><h2 className="text-lg font-semibold text-white">Rentabilidad por proyecto</h2><p className="text-sm text-neutral-500">Valores basados en horas, costos del equipo, gastos, facturas y pagos registrados.</p></div></div><div className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-neutral-900"><table className="w-full min-w-[900px] text-left"><thead className="border-b border-white/10 text-[10px] uppercase tracking-wider text-neutral-600"><tr><th className="px-4 py-3">Proyecto</th><th className="px-4 py-3 text-right">Horas</th><th className="px-4 py-3 text-right">Ingresos</th><th className="px-4 py-3 text-right">Costos</th><th className="px-4 py-3 text-right">Cobrado</th><th className="px-4 py-3 text-right">Margen</th></tr></thead><tbody>{profitability.map((project) => <tr key={project.id} className="border-b border-white/5 last:border-0"><td className="px-4 py-3"><p className="text-sm font-medium text-white">{project.name}</p><p className="text-xs text-neutral-600">{project.client.name} · {project.status}</p></td><td className="px-4 py-3 text-right text-sm text-neutral-300">{numeric.format(project.hours)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{clp.format(project.invoiced || project.agreedAmount)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{clp.format(project.totalCost)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{clp.format(project.collected)}</td><td className={`px-4 py-3 text-right text-sm font-semibold ${project.margin >= 0 ? "text-emerald-300" : "text-red-300"}`}>{clp.format(project.margin)}<p className="text-[10px] font-normal opacity-70">{numeric.format(project.marginRate * 100)}%</p></td></tr>)}</tbody></table></div></section>
+      <section><div className="flex items-end justify-between"><div><h2 className="text-lg font-semibold text-white">Rentabilidad por proyecto</h2><p className="text-sm text-neutral-500">Margen sobre neto aceptado en CLP. Costos de horas a tarifa actual; los importes históricos sin neto no se reinterpretan.</p></div></div><div className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-neutral-900"><table className="w-full min-w-[900px] text-left"><thead className="border-b border-white/10 text-[10px] uppercase tracking-wider text-neutral-600"><tr><th className="px-4 py-3">Proyecto</th><th className="px-4 py-3 text-right">Horas</th><th className="px-4 py-3 text-right">Ingresos</th><th className="px-4 py-3 text-right">Costos</th><th className="px-4 py-3 text-right">Cobrado</th><th className="px-4 py-3 text-right">Margen</th></tr></thead><tbody>{profitability.map((project) => <tr key={project.id} className="border-b border-white/5 last:border-0"><td className="px-4 py-3"><p className="text-sm font-medium text-white">{project.name}</p><p className="text-xs text-neutral-600">{project.client.name} · {project.status}</p></td><td className="px-4 py-3 text-right text-sm text-neutral-300">{numeric.format(project.hours)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{project.acceptedNet === null ? "Sin neto confirmado" : clp.format(project.acceptedNet)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{clp.format(project.totalCost)}</td><td className="px-4 py-3 text-right text-sm text-neutral-300">{clp.format(project.collected)}</td><td className={`px-4 py-3 text-right text-sm font-semibold ${(project.margin ?? 0) >= 0 ? "text-emerald-300" : "text-red-300"}`}>{project.margin === null ? "Sin neto confirmado" : clp.format(project.margin)}<p className="text-[10px] font-normal opacity-70">{project.marginRate === null ? "—" : `${numeric.format(project.marginRate * 100)}%`}</p></td></tr>)}</tbody></table></div></section>
 
       <section><h2 className="text-lg font-semibold text-white">Capacidad semanal</h2><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{team.map((member) => { const used = member.timeEntries.reduce((sum, entry) => sum + entry.hours, 0); const utilization = member.weeklyCapacity ? used / member.weeklyCapacity : 0; return <div key={member.id} className="rounded-xl border border-white/10 bg-neutral-900 p-4"><div className="flex items-center justify-between"><div><p className="text-sm font-medium text-white">{member.name}</p><p className="text-xs text-neutral-500">{member.role}</p></div><Gauge size={16} className={utilization > 1 ? "text-red-300" : "text-neutral-600"} /></div><div className="mt-4 flex justify-between text-xs text-neutral-500"><span>{numeric.format(used)} h usadas</span><span>{numeric.format(member.weeklyCapacity)} h disponibles</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-800"><div className={`h-full rounded-full ${utilization > 1 ? "bg-red-400" : utilization > .8 ? "bg-amber-400" : "bg-sky-400"}`} style={{ width: `${Math.min(100, utilization * 100)}%` }} /></div></div>})}</div></section>
     </div>
