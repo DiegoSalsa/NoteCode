@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 type Portal = {
   id: string;
   label: string;
@@ -13,15 +13,24 @@ export default function ProjectPortal({ projectId }: { projectId: string }) {
   const [portals, setPortals] = useState<Portal[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  async function load() {
-    const r = await fetch(`/api/projects/${projectId}/portal`);
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    setPortals(data);
-  }
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const r = await fetch(`/api/projects/${projectId}/portal`, { signal });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      if (!signal?.aborted) setPortals(data);
+    },
+    [projectId],
+  );
   useEffect(() => {
-    void load().catch((e) => setError(e.message));
-  }, [projectId]);
+    const controller = new AbortController();
+    setPortals([]);
+    setError("");
+    void load(controller.signal).catch((e) => {
+      if (!controller.signal.aborted) setError(e.message);
+    });
+    return () => controller.abort();
+  }, [load]);
   async function action(
     url: string,
     body: Record<string, unknown>,
