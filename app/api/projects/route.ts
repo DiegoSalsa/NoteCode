@@ -1,3 +1,5 @@
+import { projectPriceData } from "@/lib/commercial/project-price";
+import { commercialFailure } from "@/lib/commercial/http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
@@ -58,6 +60,7 @@ export async function POST(request: NextRequest) {
                     personalOwnerId: scope === "personal" ? user.id : null,
                     status: body.status || "En progreso",
                     agreedAmount: Number(body.agreedAmount) || 0,
+                    ...projectPriceData(body),
                     budgetHours: Number(body.budgetHours) || 0,
                     budgetCost: Number(body.budgetCost) || 0,
                     startDate: body.startDate ? new Date(body.startDate) : null,
@@ -66,7 +69,7 @@ export async function POST(request: NextRequest) {
                     clientId,
                     objective: body.objective || template?.objective || null,
                     specificObjectives: body.specificObjectives || template?.specificObjectives || null,
-                    scope: body.scope || template?.scope || null,
+                    scope: body.projectScope || template?.scope || null,
                     exclusions: body.exclusions || template?.exclusions || null,
                     priority: body.priority || "Media",
                     templateKey: template?.key ?? null,
@@ -137,6 +140,6 @@ export async function POST(request: NextRequest) {
             return { status: 201, body: project };
         });
     } catch (error) {
-        return NextResponse.json({ error: "Failed to create project" }, { status: 500 });
+        return commercialFailure(error);
     }
 }

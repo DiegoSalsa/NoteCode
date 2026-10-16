@@ -6,20 +6,16 @@ export type QuoteLineInput = {
   unitPrice: number;
 };
 
-export function quoteTotal(
-  items: Array<{ quantity: number; unitPrice: number }>,
-  discount = 0,
-  taxRate = 19,
-) {
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const net = subtotal * (1 - Math.max(0, discount) / 100);
-  return net * (1 + Math.max(0, taxRate) / 100);
+export { quoteTotals } from "./commercial/money";
+import { quoteTotals } from "./commercial/money";
+export function quoteTotal(items: Array<{ quantity: number; unitPrice: number }>, discount = 0, taxRate = 19, currency = "CLP", version = 1) {
+  return quoteTotals(items, discount, taxRate, currency, version).total;
 }
 
 export async function assertProjectBelongsToClient(projectId?: string | null, clientId?: string | null) {
   if (!projectId) return null;
   const project = await prisma.project.findFirst({
-    where: { id: projectId, deletedAt: null },
+    where: { id: projectId, visibility: "COMPANY", deletedAt: null },
     select: { id: true, clientId: true, name: true },
   });
   if (!project) throw new Error("El proyecto seleccionado no existe.");
@@ -29,18 +25,3 @@ export async function assertProjectBelongsToClient(projectId?: string | null, cl
   return project;
 }
 
-export async function syncApprovedQuoteToProject(quoteId: string) {
-  const quote = await prisma.quote.findUnique({
-    where: { id: quoteId },
-    include: { items: true },
-  });
-  if (!quote || quote.status !== "Aprobada" || !quote.projectId) return;
-
-  await prisma.project.update({
-    where: { id: quote.projectId },
-    data: {
-      agreedAmount: quoteTotal(quote.items, quote.discount, quote.taxRate),
-      currency: quote.currency,
-    },
-  });
-}

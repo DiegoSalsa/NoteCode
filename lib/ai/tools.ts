@@ -1,3 +1,11 @@
+import { decideApproval } from "@/lib/commercial/approvals";
+import { projectPriceData } from "@/lib/commercial/project-price";
+import { projectEconomics } from "@/lib/commercial/economics";
+import { createCommercialTools } from "./commercial-tools";
+import { quoteCommand } from "@/lib/commercial/commands";
+import { quoteHash, quoteInclude } from "@/lib/commercial/quotes";
+import { quoteTotals } from "@/lib/commercial/money";
+import { updateInvoice } from "@/lib/commercial/billing";
 import { createHash, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { tool } from "ai";
@@ -67,16 +75,8 @@ const quoteItemSchema = z.object({
     unitPrice: z.number().nonnegative().describe("Precio unitario neto antes de IVA, en CLP."),
 });
 
-function calculateQuoteTotals(
-    items: Array<{ quantity: number; unitPrice: number }>,
-    discount: number,
-    taxRate: number,
-) {
-    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    const discountAmount = subtotal * Math.max(0, discount) / 100;
-    const net = subtotal - discountAmount;
-    const tax = net * Math.max(0, taxRate) / 100;
-    return { subtotal, discountAmount, net, tax, total: net + tax };
+function calculateQuoteTotals(items: Array<{ quantity: number; unitPrice: number }>, discount: number, taxRate: number, currency = "CLP", version = 0) {
+    return quoteTotals(items, discount, taxRate, currency, version);
 }
 
 export type GilbertoToolContext = {
@@ -181,6 +181,7 @@ export function createTools(context: GilbertoToolContext = {}) {
         contextProjectId?: string | null;
     }) => resolveScopedProjectForTool({ ...input, userId: context.userId });
     return {
+    ...createCommercialTools(context, confirmationRequired),
     getProyectos: tool({
         description:
             "Obtiene proyectos de empresa o los proyectos personales del usuario. Los proyectos personales solo se consultan dentro de la sesion de su propietario.",
@@ -1565,11 +1566,15 @@ export function createTools(context: GilbertoToolContext = {}) {
             clientName: z.string().max(160).default(""),
             description: z.string().max(2000).default(""),
             status: z.enum(["Planificado", "En progreso", "Revision", "Revisión", "Completado"]).default("Planificado"),
+            saleNetAmount: z.number().nonnegative().optional().describe("Precio de venta neto, sin IVA, cuando fue definido explícitamente."),
+            saleTaxRate: z.number().min(0).max(100).default(19),
+            commercialTerms: z.string().max(10000).default(""),
             agreedAmount: z.number().nonnegative().default(0).describe("Monto acordado en pesos chilenos."),
             ambito: z.enum(["empresa", "personal"]).default("empresa").describe("Usa personal para un proyecto que solo pertenezca al usuario."),
             confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
         }),
-        execute: async ({ name, clientName, description, status, agreedAmount, ambito, confirmado }) => {
+        execute: async ({ name, clientName, description, status, agreedAmount, saleNetAmount, saleTaxRate, commercialTerms, ambito, confirmado }) => {
+            if (ambito === "empresa" && !["ADMIN", "MANAGER"].includes(context.role ?? "")) return { error: "Sin permisos comerciales." };
             if (ambito === "personal" && !context.userId) return { error: "Necesito una sesion activa para crear un proyecto personal." };
             if (ambito === "empresa" && !clientName.trim()) return { error: "Necesito el cliente para crear un proyecto de empresa." };
             if (!confirmado) {
@@ -1590,6 +1595,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                     description: description || null,
                     status,
                     agreedAmount,
+                    ...(ambito === "empresa" ? projectPriceData({ saleNetAmount, saleTaxRate, commercialTerms }) : {}),
                     visibility: ambito === "personal" ? PERSONAL_VISIBILITY : COMPANY_VISIBILITY,
                     personalOwnerId: ambito === "personal" ? context.userId : null,
                     clientId,
@@ -1608,299 +1614,6 @@ export function createTools(context: GilbertoToolContext = {}) {
                 agreedAmountClp: formatClp(project.agreedAmount),
                 createdAt: project.createdAt.toISOString(),
                 updatedAt: project.updatedAt.toISOString(),
-            };
-        },
-    }),
-    crearFactura: tool({
-        description:
-            "Crea una factura en finanzas por un monto en pesos chilenos. Requiere confirmacion explicita.",
-        inputSchema: z.object({
-            number: z.string().min(1).max(80).describe("Numero de factura."),
-            client: z.string().min(1).max(160).describe("Cliente de la factura."),
-            amount: z.number().positive().describe("Monto total en pesos chilenos."),
-            status: z.enum(["Pendiente", "Pagado", "Vencido", "Cancelado"]).default("Pendiente"),
-            dueDate: z.string().min(1).describe("Fecha de vencimiento en formato ISO o YYYY-MM-DD."),
-            confirmado: z.boolean().default(false).describe("Debe ser true solo cuando el usuario confirmo explicitamente."),
-        }),
-        execute: async ({ number, client, amount, status, dueDate, confirmado }) => {
-            if (!canUseFinance) return { error: "No tienes permiso para crear facturas." };
-            if (!confirmado) {
-                return confirmationRequired(context, "crearFactura", {
-                    number,
-                    client,
-                    amountClp: formatClp(amount),
-                    status,
-                    dueDate,
-                });
-            }
-
-            const parsedDueDate = new Date(dueDate);
-            if (Number.isNaN(parsedDueDate.getTime())) {
-                return { error: "La fecha de vencimiento no es valida. Usa YYYY-MM-DD." };
-            }
-
-            const invoice = await prisma.invoice.create({
-                data: {
-                    number,
-                    client,
-                    amount,
-                    status,
-                    dueDate: parsedDueDate,
-                    paidAt: status === "Pagado" ? new Date() : null,
-                },
-                select: {
-                    id: true,
-                    number: true,
-                    client: true,
-                    amount: true,
-                    status: true,
-                    dueDate: true,
-                    paidAt: true,
-                    createdAt: true,
-                },
-            });
-
-            invalidateCache("invoices");
-
-            return {
-                ...invoice,
-                amountClp: formatClp(invoice.amount),
-                dueDate: invoice.dueDate.toISOString(),
-                paidAt: invoice.paidAt?.toISOString() ?? null,
-                createdAt: invoice.createdAt.toISOString(),
-            };
-        },
-    }),
-    crearCotizacion: tool({
-        description:
-            "Crea una cotizacion formal en el ERP, vinculada al proyecto y cliente, con una propuesta imprimible o guardable como PDF. Usala de inmediato cuando el usuario diga crear o generar una cotizacion; una orden directa no necesita una segunda confirmacion.",
-        inputSchema: z.object({
-            projectId: z.string().default("").describe("ID del proyecto. Opcional si hay un proyecto abierto."),
-            projectName: z.string().default("").describe("Nombre del proyecto. Opcional si hay un proyecto abierto."),
-            clientName: z.string().default("").describe("Cliente, solo si la cotizacion no pertenece a un proyecto."),
-            title: z.string().max(200).default("").describe("Titulo de la propuesta. Si se omite se usa el nombre del proyecto."),
-            items: z.array(quoteItemSchema).max(30).default([]).describe("Lineas netas antes de IVA. Si se omiten, se usa el monto total o el monto acordado del proyecto."),
-            totalClp: z.number().nonnegative().default(0).describe("Total final con IVA incluido, usado para crear una linea automatica si no se entregan items."),
-            taxRate: z.number().min(0).max(100).default(19).describe("IVA en porcentaje."),
-            discount: z.number().min(0).max(99).default(0).describe("Descuento porcentual."),
-            validDays: z.number().int().min(1).max(365).default(30),
-            terms: z.string().max(4000).default(""),
-            notes: z.string().max(2000).default(""),
-            status: z.enum(["Borrador", "Enviada"]).default("Borrador"),
-        }),
-        execute: async ({ projectId, projectName, clientName, title, items, totalClp, taxRate, discount, validDays, terms, notes, status }) => {
-            const hasProjectReference = Boolean(projectId.trim() || projectName.trim() || context.currentProjectId);
-            const resolvedProject = hasProjectReference
-                ? await resolveProjectForTool({
-                      projectId: projectId.trim() || undefined,
-                      projectName,
-                      contextProjectId: context.currentProjectId,
-                  })
-                : null;
-
-            if (resolvedProject && !resolvedProject.project) return resolvedProject;
-            const project = resolvedProject?.project ?? null;
-
-            let client: { id: string; name: string; company: string | null };
-            if (project) {
-                if (!project.client) return { error: "Los proyectos personales no tienen cotizaciones ni cliente asociado." };
-                client = project.client;
-                const existing = await prisma.quote.findFirst({
-                    where: { projectId: project.id, deletedAt: null },
-                    include: { items: { orderBy: { sortOrder: "asc" } }, client: { select: { id: true, name: true, company: true } } },
-                });
-                if (existing) {
-                    return {
-                        alreadyExists: true,
-                        message: "Este proyecto ya tiene una cotizacion formal.",
-                        quote: existing,
-                        totals: calculateQuoteTotals(existing.items, existing.discount, existing.taxRate),
-                        proposalUrl: `/cotizaciones/${existing.id}`,
-                        erpUrl: "/erp?tab=cotizaciones",
-                    };
-                }
-            } else {
-                const resolvedClient = await resolveClientForTool(clientName);
-                if (!resolvedClient.client) return resolvedClient;
-                client = resolvedClient.client;
-            }
-
-            let quoteItems = items.map((item) => ({
-                description: item.description.trim(),
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-            }));
-
-            if (!quoteItems.length) {
-                const finalTotal = totalClp > 0 ? totalClp : project?.agreedAmount ?? 0;
-                if (finalTotal <= 0) {
-                    return { error: "Necesito el monto total o al menos una linea con precio para crear la cotizacion." };
-                }
-                const factor = (1 - discount / 100) * (1 + taxRate / 100);
-                quoteItems = [{
-                    description: title.trim() || project?.name || "Servicios profesionales",
-                    quantity: 1,
-                    unitPrice: finalTotal / factor,
-                }];
-            }
-
-            const validUntil = new Date();
-            validUntil.setDate(validUntil.getDate() + validDays);
-            const number = await nextQuoteNumber();
-            const quote = await prisma.quote.create({
-                data: {
-                    number,
-                    clientId: client.id,
-                    projectId: project?.id ?? null,
-                    title: title.trim() || project?.name || `Propuesta para ${client.company || client.name}`,
-                    status,
-                    currency: "CLP",
-                    taxRate,
-                    discount,
-                    validUntil,
-                    terms: terms.trim() || null,
-                    notes: notes.trim() || null,
-                    sentAt: status === "Enviada" ? new Date() : null,
-                    items: {
-                        create: quoteItems.map((item, index) => ({ ...item, sortOrder: index })),
-                    },
-                },
-                include: {
-                    client: { select: { id: true, name: true, company: true, email: true } },
-                    project: { select: { id: true, name: true } },
-                    items: { orderBy: { sortOrder: "asc" } },
-                },
-            });
-
-            const totals = calculateQuoteTotals(quote.items, quote.discount, quote.taxRate);
-            await Promise.all([
-                recordAudit({
-                    action: "CREATE",
-                    entityType: "Quote",
-                    entityId: quote.id,
-                    summary: `Cotizacion ${quote.number} creada por Gilberto`,
-                    metadata: { projectId: quote.projectId, clientId: quote.clientId, total: totals.total },
-                }),
-                notify({
-                    userId: context.userId,
-                    type: "quote",
-                    title: `Cotizacion creada: ${quote.number}`,
-                    message: `${quote.title} por ${formatClp(totals.total)}.`,
-                    href: "/erp?tab=cotizaciones",
-                    severity: "success",
-                }),
-            ]);
-            invalidateCache(`project:${project?.id ?? ""}`);
-
-            return {
-                created: true,
-                quote,
-                totals: {
-                    ...totals,
-                    subtotalClp: formatClp(totals.subtotal),
-                    taxClp: formatClp(totals.tax),
-                    totalClp: formatClp(totals.total),
-                },
-                proposalUrl: `/cotizaciones/${quote.id}`,
-                erpUrl: "/erp?tab=cotizaciones",
-                instruction: "Informa que la cotizacion ya fue creada y entrega el enlace de propuesta. Indica que desde ahi puede imprimirse o guardarse como PDF.",
-            };
-        },
-    }),
-    publicarCotizacionPortal: tool({
-        description:
-            "Publica una cotizacion existente en el portal del cliente cambiandola de Borrador a Enviada. Usala cuando el usuario diga subir, publicar, enviar o hacer visible una cotizacion en el portal; no necesita crear otro portal ni pedir confirmacion adicional.",
-        inputSchema: z.object({
-            quoteId: z.string().default(""),
-            quoteNumber: z.string().default(""),
-            projectId: z.string().default(""),
-            projectName: z.string().default(""),
-        }),
-        execute: async ({ quoteId, quoteNumber, projectId, projectName }) => {
-            let resolvedProjectId = projectId.trim() || context.currentProjectId || "";
-            if (!resolvedProjectId && projectName.trim()) {
-                const resolved = await resolveProjectForTool({ projectName });
-                if (!resolved.project) return resolved;
-                resolvedProjectId = resolved.project.id;
-            }
-
-            const matches = await prisma.quote.findMany({
-                where: {
-                    deletedAt: null,
-                    ...(quoteId.trim()
-                        ? { id: quoteId.trim() }
-                        : quoteNumber.trim()
-                          ? { number: { contains: quoteNumber.trim(), mode: "insensitive" } }
-                          : resolvedProjectId
-                            ? { projectId: resolvedProjectId }
-                            : {}),
-                },
-                orderBy: { updatedAt: "desc" },
-                take: 5,
-                include: {
-                    client: { select: { id: true, name: true, company: true } },
-                    project: { select: { id: true, name: true } },
-                    items: { orderBy: { sortOrder: "asc" } },
-                },
-            });
-            if (!quoteId.trim() && !quoteNumber.trim() && !resolvedProjectId) {
-                return { error: "Necesito la cotizacion, su numero o el proyecto al que pertenece." };
-            }
-            if (matches.length !== 1) {
-                return matches.length
-                    ? { error: "Encontre varias cotizaciones. Indica cual publicar.", matches: matches.map((item) => ({ id: item.id, number: item.number, title: item.title, project: item.project?.name })) }
-                    : { error: "No encontre una cotizacion para publicar." };
-            }
-
-            const quote = matches[0];
-            const [updated, activePortals] = await Promise.all([
-                prisma.quote.update({
-                    where: { id: quote.id },
-                    data: { status: "Enviada", sentAt: quote.sentAt ?? new Date() },
-                    include: {
-                        client: { select: { id: true, name: true, company: true } },
-                        project: { select: { id: true, name: true } },
-                        items: { orderBy: { sortOrder: "asc" } },
-                    },
-                }),
-                prisma.clientPortalToken.count({
-                    where: {
-                        clientId: quote.clientId,
-                        revokedAt: null,
-                        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-                    },
-                }),
-            ]);
-            const totals = calculateQuoteTotals(updated.items, updated.discount, updated.taxRate);
-            await Promise.all([
-                recordAudit({
-                    action: "PUBLISH",
-                    entityType: "Quote",
-                    entityId: updated.id,
-                    summary: `Cotizacion ${updated.number} publicada por Gilberto`,
-                    metadata: { clientId: updated.clientId, projectId: updated.projectId, activePortals },
-                }),
-                notify({
-                    userId: context.userId,
-                    type: "quote",
-                    title: `Cotizacion publicada: ${updated.number}`,
-                    message: `${updated.title} ya es visible en el portal de ${updated.client.company || updated.client.name}.`,
-                    href: "/erp?tab=cotizaciones",
-                    severity: "success",
-                }),
-            ]);
-
-            return {
-                published: true,
-                quote: updated,
-                totals: { ...totals, totalClp: formatClp(totals.total) },
-                activePortals,
-                visibleInPortal: activePortals > 0,
-                proposalUrl: `/cotizaciones/${updated.id}`,
-                erpUrl: "/erp?tab=cotizaciones",
-                instruction: activePortals
-                    ? "Confirma que ya esta visible en el portal existente."
-                    : "La cotizacion quedo Enviada, pero el cliente no tiene un acceso de portal activo.",
             };
         },
     }),
@@ -1947,19 +1660,10 @@ export function createTools(context: GilbertoToolContext = {}) {
                 const resolved = requireUnique(matches, "la cotizacion");
                 if (!resolved.item) return resolved;
                 const nextStatus = status || undefined;
-                item = await prisma.quote.update({
-                    where: { id: resolved.item.id },
-                    data: {
-                        title: stringField("title") || undefined,
-                        status: nextStatus,
-                        validUntil: optionalDate("validUntil"),
-                        terms: fields.terms === null ? null : stringField("terms") || undefined,
-                        notes: fields.notes === null ? null : stringField("notes") || undefined,
-                        sentAt: nextStatus === "Enviada" ? new Date() : undefined,
-                        approvedAt: nextStatus === "Aprobada" ? new Date() : undefined,
-                        rejectedAt: nextStatus === "Rechazada" ? new Date() : undefined,
-                    },
-                });
+                if (!["ADMIN", "MANAGER"].includes(context.role ?? "")) return { error: "Sin permisos comerciales." };
+                const current = await prisma.quote.findUniqueOrThrow({ where: { id: resolved.item.id }, include: quoteInclude });
+                const actor = { name: "Gilberto", userId: context.userId, origin: "AI" as const };
+                item = await quoteCommand(current.id, nextStatus ? { status: nextStatus, contentHash: quoteHash(current), editVersion: current.editVersion } : { title: stringField("title") || undefined, terms: fields.terms === null ? null : stringField("terms") || undefined, notes: fields.notes === null ? null : stringField("notes") || undefined, validUntil: optionalDate("validUntil")?.toISOString(), editVersion: current.editVersion }, actor) as { id: string };
                 href = `/cotizaciones/${item.id}`;
             } else if (area === "proyecto") {
                 const projectId = term || context.currentProjectId || "";
@@ -1977,6 +1681,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                         description: fields.description === null ? null : stringField("description") || undefined,
                         status: status || undefined,
                         agreedAmount: optionalNumber("agreedAmount"),
+                        ...projectPriceData(fields),
                         budgetHours: optionalNumber("budgetHours"),
                         budgetCost: optionalNumber("budgetCost"),
                         startDate: optionalDate("startDate"),
@@ -2013,16 +1718,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 });
                 const resolved = requireUnique(matches, "la factura");
                 if (!resolved.item) return resolved;
-                item = await prisma.invoice.update({
-                    where: { id: resolved.item.id },
-                    data: {
-                        status: status || undefined,
-                        amount: optionalNumber("amount"),
-                        dueDate: optionalDate("dueDate"),
-                        notes: fields.notes === null ? null : stringField("notes") || undefined,
-                        paidAt: status === "Pagado" ? new Date() : undefined,
-                    },
-                });
+                item = await updateInvoice(resolved.item.id, { status: status || undefined, amount: optionalNumber("amount"), dueDate: optionalDate("dueDate")?.toISOString(), notes: fields.notes === null ? null : stringField("notes") || undefined }, { name: "Gilberto", userId: context.userId, origin: "AI" });
                 href = "/finanzas";
             } else if (area === "ticket") {
                 const matches = await prisma.supportTicket.findMany({
@@ -2073,15 +1769,8 @@ export function createTools(context: GilbertoToolContext = {}) {
                 });
                 const resolved = requireUnique(matches, "la aprobacion");
                 if (!resolved.item) return resolved;
-                item = await prisma.clientApproval.update({
-                    where: { id: resolved.item.id },
-                    data: {
-                        status: status || undefined,
-                        feedback: fields.feedback === null ? null : stringField("feedback") || undefined,
-                        decidedAt: status && status !== "Pendiente" ? new Date() : undefined,
-                        decidedBy: status && status !== "Pendiente" ? "PuroCode" : undefined,
-                    },
-                });
+                if (!["ADMIN", "MANAGER"].includes(context.role ?? "")) return { error: "Sin permisos para decidir aprobaciones." };
+                item = await decideApproval(resolved.item.id, status, stringField("feedback"), { name: "Gilberto", userId: context.userId, origin: "AI" });
                 href = "/erp?tab=aprobaciones";
             } else if (area === "orden-compra") {
                 if (!canUseFinance) return { error: "No tienes permiso para modificar ordenes de compra." };
@@ -2582,76 +2271,6 @@ export function createTools(context: GilbertoToolContext = {}) {
             };
         },
     }),
-    registrarPago: tool({
-        description:
-            "Registra un pago contra una factura y actualiza automaticamente su estado. Si el usuario ordena registrarlo e indica claramente factura y monto, esa orden cuenta como confirmacion.",
-        inputSchema: z.object({
-            invoiceNumber: z.string().min(1).max(100),
-            amount: z.number().positive(),
-            paidAt: z.string().default("").describe("YYYY-MM-DD; vacio usa hoy."),
-            method: z.string().min(1).max(80).default("Transferencia"),
-            reference: z.string().max(200).default(""),
-            notes: z.string().max(2000).default(""),
-            confirmado: z.boolean().default(false).describe("True si el usuario dio una orden directa con factura y monto claros."),
-        }),
-        execute: async ({ invoiceNumber, amount, paidAt, method, reference, notes, confirmado }) => {
-            if (!canUseFinance) return { error: "No tienes permiso para registrar pagos." };
-            const invoices = await prisma.invoice.findMany({
-                where: { deletedAt: null, number: { contains: invoiceNumber.trim(), mode: "insensitive" } },
-                take: 5,
-                include: { payments: true },
-            });
-            if (invoices.length !== 1) {
-                return invoices.length
-                    ? { error: "Encontre varias facturas parecidas. Indica el numero exacto.", matches: invoices.map((item) => ({ id: item.id, number: item.number, client: item.client, amount: item.amount })) }
-                    : { error: "No encontre la factura indicada." };
-            }
-            const invoice = invoices[0];
-            const parsedDate = paidAt.trim() ? new Date(paidAt) : new Date();
-            if (Number.isNaN(parsedDate.getTime())) return { error: "La fecha no es valida. Usa YYYY-MM-DD." };
-            if (!confirmado) {
-                return confirmationRequired(context, "registrarPago", {
-                    invoice: invoice.number,
-                    client: invoice.client,
-                    amountClp: formatClp(amount),
-                    paidAt: parsedDate.toISOString().slice(0, 10),
-                    method,
-                });
-            }
-
-            const payment = await prisma.payment.create({
-                data: {
-                    invoiceId: invoice.id,
-                    amount,
-                    paidAt: parsedDate,
-                    method,
-                    reference: reference.trim() || null,
-                    notes: notes.trim() || null,
-                },
-            });
-            const paid = invoice.payments.reduce((sum, item) => sum + item.amount, 0) + amount;
-            const nextStatus = paid >= invoice.amount ? "Pagado" : "Parcial";
-            await prisma.invoice.update({
-                where: { id: invoice.id },
-                data: { status: nextStatus, paidAt: nextStatus === "Pagado" ? parsedDate : null },
-            });
-            await recordAudit({
-                action: "CREATE",
-                entityType: "Payment",
-                entityId: payment.id,
-                summary: `Pago registrado por Gilberto en ${invoice.number}`,
-                metadata: { invoiceId: invoice.id, amount },
-            });
-            invalidateCache("invoices");
-
-            return {
-                created: true,
-                payment: { ...payment, amountClp: formatClp(payment.amount) },
-                invoice: { number: invoice.number, client: invoice.client, status: nextStatus, paidClp: formatClp(paid), totalClp: formatClp(invoice.amount) },
-                erpUrl: "/erp?tab=pagos",
-            };
-        },
-    }),
     getCRM: tool({
         description: "Resume el pipeline comercial, oportunidades, valor ponderado y proximas acciones.",
         inputSchema: z.object({}),
@@ -2694,10 +2313,11 @@ export function createTools(context: GilbertoToolContext = {}) {
             if (!canUseFinance) return { error: "No tienes permiso para consultar rentabilidad." };
             const projects = await prisma.project.findMany({
                 where: {
-                    deletedAt: null,
+                    deletedAt: null, visibility: "COMPANY",
                     ...(projectName.trim() ? { name: { contains: projectName.trim(), mode: "insensitive" } } : {}),
                 },
                 include: {
+                    currentAgreement: { select: { netAmount: true } },
                     client: { select: { name: true } },
                     timeEntries: { include: { teamMember: { select: { hourlyCost: true } } } },
                     expenses: { where: { deletedAt: null } },
@@ -2706,28 +2326,9 @@ export function createTools(context: GilbertoToolContext = {}) {
                 take: 30,
             });
             return projects.map((project) => {
-                const hours = project.timeEntries.reduce((sum, item) => sum + item.hours, 0);
-                const laborCost = project.timeEntries.reduce((sum, item) => sum + item.hours * item.teamMember.hourlyCost, 0);
-                const expenseCost = project.expenses.reduce((sum, item) => sum + item.amount, 0);
-                const invoiced = project.invoices.reduce((sum, item) => sum + item.amount, 0);
-                const collected = project.invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0), 0);
-                const revenue = invoiced || project.agreedAmount;
-                const cost = laborCost + expenseCost;
-                return {
-                    id: project.id,
-                    project: project.name,
-                    client: project.client?.name ?? "Proyecto personal",
-                    hours,
-                    revenue,
-                    revenueClp: formatClp(revenue),
-                    cost,
-                    costClp: formatClp(cost),
-                    collected,
-                    collectedClp: formatClp(collected),
-                    margin: revenue - cost,
-                    marginClp: formatClp(revenue - cost),
-                    marginPercent: revenue ? Math.round((revenue - cost) / revenue * 1000) / 10 : 0,
-                };
+                const economic = projectEconomics({ ...project, acceptedNet: project.currentAgreement ? Number(project.currentAgreement.netAmount) : null });
+                return { id: project.id, project: project.name, client: project.client?.name, currency: project.currency, ...economic, note: "Margen sobre precio neto aceptado; tarifas del equipo actuales. Sin neto confirmado no se calcula margen." };
+
             });
         },
     }),
@@ -2855,7 +2456,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                     });
                     return quotes.map((quote) => ({
                         ...quote,
-                        totals: calculateQuoteTotals(quote.items, quote.discount, quote.taxRate),
+                        totals: calculateQuoteTotals(quote.items, quote.discount, quote.taxRate, quote.currency, quote.calculationVersion),
                         proposalUrl: `/cotizaciones/${quote.id}`,
                     }));
                 }

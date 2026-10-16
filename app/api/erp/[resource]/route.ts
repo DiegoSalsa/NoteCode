@@ -1,3 +1,4 @@
+import { projectEconomics } from "@/lib/commercial/economics";
 import { createHash, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,10 @@ import { notify, recordAudit } from "@/lib/audit";
 import { decryptString, encryptString } from "@/lib/crypto";
 import { cached, invalidateCache } from "@/lib/server-cache";
 import { assertProjectBelongsToClient } from "@/lib/commercial";
+import { quoteTotals } from "@/lib/commercial/money";
+import { createQuote, quoteHash, quoteInclude } from "@/lib/commercial/quotes";
+import { recordPayment } from "@/lib/commercial/billing";
+import { commercialFailure } from "@/lib/commercial/http";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -28,14 +33,6 @@ function required(body: Record<string, unknown>, fields: string[]) {
 
 async function nextNumber(prefix: string, count: number) {
   return `${prefix}-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
-}
-
-function quoteTotals(items: Array<{ quantity: number; unitPrice: number }>, discount: number, taxRate: number) {
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const discountAmount = subtotal * Math.max(0, discount) / 100;
-  const net = subtotal - discountAmount;
-  const tax = net * Math.max(0, taxRate) / 100;
-  return { subtotal, discountAmount, net, tax, total: net + tax };
 }
 
 export async function GET(
@@ -214,6 +211,7 @@ export async function GET(
           },
           orderBy: { updatedAt: "desc" },
           include: {
+            currentAgreement: { select: { netAmount: true } },
             client: { select: { id: true, name: true } },
             assignments: {
               include: { teamMember: { select: { id: true, name: true, hourlyCost: true } } },
@@ -248,28 +246,9 @@ export async function GET(
         return NextResponse.json(projects.map((project) => {
           const hours = project.timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
           const approvedHours = project.timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0);
-          const laborCost = project.timeEntries.reduce(
-            (sum, entry) => sum + entry.hours * entry.teamMember.hourlyCost,
-            0,
-          );
-          const expenses = project.expenses.reduce((sum, expense) => sum + expense.amount, 0);
-          const invoiced = project.invoices.reduce((sum, invoice) => sum + invoice.amount, 0);
-          const collected = project.invoices.reduce(
-            (sum, invoice) => sum + invoice.payments.reduce((paymentSum, payment) => paymentSum + payment.amount, 0),
-            0,
-          );
           const openTickets = project.tickets.filter((ticket) => !["Resuelto", "Cerrado"].includes(ticket.status)).length;
           const pendingApprovals = project.approvals.filter((approval) => approval.status === "Pendiente").length;
-          const financials = hasFinanceAccess
-            ? {
-                laborCost,
-                expenses,
-                totalCost: laborCost + expenses,
-                invoiced,
-                collected,
-                margin: project.agreedAmount - laborCost - expenses,
-              }
-            : null;
+          const financials = hasFinanceAccess ? projectEconomics({ ...project, acceptedNet: project.currentAgreement ? Number(project.currentAgreement.netAmount) : null }) : null;
 
           return {
             id: project.id,
@@ -336,9 +315,9 @@ export async function GET(
         const quotes = await prisma.quote.findMany({
           where: { deletedAt: null, ...(projectId ? { projectId } : {}) },
           orderBy: { createdAt: "desc" },
-          include: { client: { select: { id: true, name: true } }, opportunity: { select: { id: true, name: true } }, project: { select: { id: true, name: true } }, items: { orderBy: { sortOrder: "asc" } } },
+          include: { ...quoteInclude, opportunity: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } },
         });
-        return NextResponse.json(quotes.map((quote) => ({ ...quote, totals: quoteTotals(quote.items, quote.discount, quote.taxRate) })));
+        return NextResponse.json(quotes.map((quote) => ({ ...quote, contentHash: quoteHash(quote), totals: quoteTotals(quote.items, quote.discount, quote.taxRate, quote.currency, quote.calculationVersion) })));
       }
       case "team":
         return NextResponse.json(await prisma.teamMember.findMany({
@@ -565,29 +544,8 @@ export async function POST(
         break;
       }
       case "quotes": {
-        const error = required(body, ["clientId", "title"]);
-        if (error) return NextResponse.json({ error }, { status: 400 });
-        const items = Array.isArray(body.items) ? body.items as Array<Record<string, unknown>> : [];
-        if (!items.length) return NextResponse.json({ error: "La cotización necesita al menos un ítem." }, { status: 400 });
-        if (items.some((line) => !text(line.description))) {
-          return NextResponse.json({ error: "Todos los ítems necesitan descripción." }, { status: 400 });
-        }
-        await assertProjectBelongsToClient(text(body.projectId) || null, text(body.clientId));
-        const numberValue = text(body.number) || await nextNumber("COT", await prisma.quote.count());
-        item = await prisma.quote.create({
-          data: {
-            number: numberValue, clientId: text(body.clientId), opportunityId: text(body.opportunityId) || null,
-            projectId: text(body.projectId) || null,
-            title: text(body.title), status: text(body.status) || "Borrador", currency: text(body.currency) || "CLP",
-            taxRate: number(body.taxRate, 19), discount: number(body.discount), validUntil: date(body.validUntil),
-            terms: text(body.terms) || null, notes: text(body.notes) || null,
-            items: { create: items.map((line, index) => ({
-              description: text(line.description), quantity: Math.max(0.01, number(line.quantity, 1)),
-              unitPrice: Math.max(0, number(line.unitPrice)), sortOrder: index,
-            })) },
-          },
-        });
-        break;
+        if (!canManage(user)) return NextResponse.json({ error: "Sin permisos comerciales." }, { status: 403 });
+        return NextResponse.json(await createQuote(body, { name: user.name, userId: user.id, origin: "INTERNAL" }), { status: 201 });
       }
       case "team": {
         const error = required(body, ["name"]);
@@ -661,22 +619,7 @@ export async function POST(
         break;
       }
       case "payments": {
-        const error = required(body, ["invoiceId", "paidAt"]);
-        if (error) return NextResponse.json({ error }, { status: 400 });
-        item = await prisma.payment.create({ data: {
-          invoiceId: text(body.invoiceId), amount: number(body.amount), currency: text(body.currency) || "CLP",
-          method: text(body.method) || "Transferencia", reference: text(body.reference) || null,
-          paidAt: date(body.paidAt)!, notes: text(body.notes) || null,
-        } });
-        const invoice = await prisma.invoice.findUnique({ where: { id: text(body.invoiceId) }, include: { payments: true } });
-        if (invoice) {
-          const paid = invoice.payments.reduce((sum, payment) => sum + payment.amount, 0);
-          await prisma.invoice.update({
-            where: { id: invoice.id },
-            data: paid >= invoice.amount ? { status: "Pagado", paidAt: date(body.paidAt) } : { status: "Parcial", paidAt: null },
-          });
-        }
-        break;
+        return NextResponse.json(await recordPayment(body, { name: user.name, userId: user.id, origin: "INTERNAL" }), { status: 201 });
       }
       case "contracts": {
         const error = required(body, ["clientId", "name", "startDate"]);
@@ -826,7 +769,6 @@ export async function POST(
     invalidateCache("project:");
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
-    console.error(`[erp:${resource}:post]`, error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo guardar." }, { status: 500 });
+    return commercialFailure(error);
   }
 }

@@ -1,3 +1,4 @@
+import { resolvePortal } from "@/lib/commercial/portal";
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -9,11 +10,8 @@ export async function GET(
   { params }: { params: Promise<{ token: string; id: string }> },
 ) {
   const { token, id } = await params;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const access = await prisma.clientPortalToken.findUnique({ where: { tokenHash } });
-  if (!access || access.revokedAt || (access.expiresAt && access.expiresAt < new Date())) {
-    return NextResponse.json({ error: "Acceso inválido." }, { status: 404 });
-  }
+  const access = await resolvePortal(token);
+  if (!access) return NextResponse.json({ error: "Acceso inválido." }, { status: 404 });
 
   const document = await prisma.document.findFirst({
     where: {
@@ -22,6 +20,7 @@ export async function GET(
       clientVisible: true,
       project: {
         clientId: access.clientId,
+        visibility: "COMPANY",
         deletedAt: null,
         ...(access.projectId ? { id: access.projectId } : {}),
       },

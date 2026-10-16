@@ -1,3 +1,4 @@
+import { billContract } from "@/lib/commercial/billing";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
@@ -43,28 +44,8 @@ async function executeAutomations(forceRoutinesForUserId?: string) {
   if (useAll || configuredTriggers.has("Cotización por vencer")) for (const quote of quotes) await create("quote-expiring", `Cotización por vencer: ${quote.number}`, quote.title, "/erp?tab=cotizaciones");
 
   for (const contract of billingContracts) {
-    const stamp = now.toISOString().slice(0, 7).replace("-", "");
-    const invoiceNumber = `REC-${stamp}-${contract.id.slice(0, 6).toUpperCase()}`;
-    await prisma.invoice.upsert({
-      where: { number: invoiceNumber },
-      update: {},
-      create: {
-        projectId: contract.projectId,
-        clientId: contract.clientId,
-        number: invoiceNumber,
-        client: contract.client.name,
-        amount: contract.monthlyAmount,
-        netAmount: contract.monthlyAmount / 1.19,
-        status: "Pendiente",
-        dueDate: new Date(now.getTime() + 15 * 86400000),
-        notes: `Facturación recurrente: ${contract.name}`,
-      },
-    });
-    const next = new Date(contract.nextBillingAt ?? now);
-    const months = contract.billingCycle === "Anual" ? 12 : contract.billingCycle === "Semestral" ? 6 : contract.billingCycle === "Trimestral" ? 3 : 1;
-    next.setMonth(next.getMonth() + months);
-    await prisma.supportContract.update({ where: { id: contract.id }, data: { lastBilledAt: now, nextBillingAt: next } });
-    await create("recurring-invoice", `Factura recurrente: ${invoiceNumber}`, contract.name, "/finanzas", "success");
+    const invoice = await billContract(contract.id, now, { name: "Motor de contratos", origin: "AUTOMATION" });
+    if (invoice) await create("recurring-invoice", `Cobro recurrente: ${invoice.number}`, contract.name, "/finanzas", "success");
   }
 
   if (rules.length) await prisma.automationRule.updateMany({ where: { active: true }, data: { lastRunAt: now } });

@@ -1,3 +1,6 @@
+import { quoteInclude, quoteHash } from "@/lib/commercial/quotes";
+import { projectPriceData } from "@/lib/commercial/project-price";
+import { commercialFailure } from "@/lib/commercial/http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveClientId, syncProjectInvoice } from "@/lib/projects";
@@ -54,6 +57,7 @@ export async function GET(
                         select: { id: true, name: true, category: true, size: true, clientVisible: true, version: true, updatedAt: true, createdAt: true },
                     },
                     invoices: {
+                      where: { deletedAt: null, status: { not: "Cancelado" } },
                       orderBy: { createdAt: "desc" },
                       select: { id: true, number: true, amount: true, status: true, source: true, product: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
                     },
@@ -89,7 +93,7 @@ export async function GET(
                     quotes: {
                       where: { deletedAt: null },
                       orderBy: [{ createdAt: "desc" }],
-                      include: { items: { orderBy: { sortOrder: "asc" } } },
+                      include: quoteInclude,
                     },
                 },
             });
@@ -178,7 +182,7 @@ export async function GET(
                     approvals,
                     contracts,
                     quote: quotes[0] ?? null,
-                    quotes,
+                    quotes: quotes.map(q => ({ ...q, contentHash: quoteHash(q) })),
                     totals: {
                         hours: timeEntries.reduce((sum, entry) => sum + entry.hours, 0),
                         approvedHours: timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0),
@@ -230,6 +234,7 @@ export async function PATCH(
                 description: body.description,
                 status: body.status,
                 agreedAmount: body.agreedAmount === undefined ? undefined : Number(body.agreedAmount) || 0,
+                ...projectPriceData(body),
                 currency: body.currency,
                 budgetHours: body.budgetHours === undefined ? undefined : Number(body.budgetHours) || 0,
                 budgetCost: body.budgetCost === undefined ? undefined : Number(body.budgetCost) || 0,
@@ -239,7 +244,7 @@ export async function PATCH(
                 clientId,
                 objective: body.objective,
                 specificObjectives: body.specificObjectives,
-                scope: body.scope,
+                scope: ["company", "personal"].includes(body.scope) ? body.projectScope : body.projectScope ?? body.scope,
                 exclusions: body.exclusions,
                 priority: body.priority,
                 tags: Array.isArray(body.tags) ? body.tags : undefined,
@@ -257,7 +262,7 @@ export async function PATCH(
         invalidateCache("vault");
         return NextResponse.json(project);
     } catch (error) {
-        return NextResponse.json({ error: "Failed to update project" }, { status: 500 });
+        return commercialFailure(error);
     }
 }
 

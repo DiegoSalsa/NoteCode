@@ -1,107 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { invalidateCache } from "@/lib/server-cache";
 import { canManageFinance, getCurrentUser } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
-import { updateInvoiceSchema } from "@/lib/validation/invoice";
-
-export async function PATCH(
-    request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
-) {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    if (!canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para modificar facturas." }, { status: 403 });
-    try {
-        const { id } = await params;
-        const parsed = updateInvoiceSchema.safeParse(await request.json().catch(() => null));
-        if (!parsed.success) {
-            return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Factura invalida." }, { status: 400 });
-        }
-        const body = parsed.data;
-        const current = await prisma.invoice.findFirst({ where: { id, deletedAt: null } });
-        if (!current) return NextResponse.json({ error: "Factura no encontrada." }, { status: 404 });
-        const effectiveClientId = body.clientId === undefined ? current.clientId : body.clientId || null;
-        const effectiveProjectId = body.projectId === undefined ? current.projectId : body.projectId || null;
-        const selectedClient = effectiveClientId
-            ? await prisma.client.findFirst({ where: { id: effectiveClientId, deletedAt: null }, select: { id: true, name: true } })
-            : null;
-        const selectedProject = effectiveProjectId
-            ? await prisma.project.findFirst({ where: { id: effectiveProjectId, deletedAt: null }, select: { id: true, clientId: true } })
-            : null;
-        if (effectiveClientId && !selectedClient) return NextResponse.json({ error: "El cliente seleccionado no existe." }, { status: 400 });
-        if (effectiveProjectId && !selectedProject) return NextResponse.json({ error: "El proyecto seleccionado no existe." }, { status: 400 });
-        if (selectedProject && selectedClient && selectedProject.clientId !== selectedClient.id) {
-            return NextResponse.json({ error: "El proyecto no pertenece al cliente seleccionado." }, { status: 400 });
-        }
-        const amount = body.amount ?? current.amount;
-        const taxRate = body.taxRate ?? current.taxRate;
-        const invoice = await prisma.invoice.update({
-            where: { id },
-            data: {
-                number: body.number,
-                client: body.client ?? selectedClient?.name,
-                amount: body.amount,
-                projectId: body.projectId === undefined ? undefined : body.projectId || null,
-                clientId: body.clientId === undefined ? undefined : body.clientId || null,
-                taxRate: body.taxRate === undefined ? undefined : Number(body.taxRate),
-                netAmount: body.amount === undefined && body.taxRate === undefined ? undefined : Number(amount) / (1 + Number(taxRate) / 100),
-                status: body.status,
-                dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
-                paidAt: body.paidAt === undefined ? undefined : body.paidAt ? new Date(body.paidAt) : null,
-                notes: body.notes === undefined ? undefined : body.notes || null,
-                source: body.source,
-                product: body.product === undefined ? undefined : body.product || null,
-                externalReference: body.externalReference === undefined ? undefined : body.externalReference || null,
-            },
-        });
-        await recordAudit({
-            action: "UPDATE",
-            entityType: "Invoice",
-            entityId: invoice.id,
-            summary: `Factura ${invoice.number} actualizada`,
-            metadata: { before: { amount: current.amount, status: current.status }, after: { amount: invoice.amount, status: invoice.status } },
-        });
-        invalidateCache("invoices");
-        invalidateCache("erp:");
-        invalidateCache("project:");
-        invalidateCache("dashboard:");
-        invalidateCache("reports:");
-        invalidateCache("tax:");
-        invalidateCache("gilberto:today:");
-        return NextResponse.json(invoice);
-    } catch (error) {
-        console.error("[invoices:update]", error);
-        return NextResponse.json({ error: "No se pudo actualizar la factura." }, { status: 500 });
-    }
+import { archiveInvoice, updateInvoice } from "@/lib/commercial/billing";
+import { commercialFailure } from "@/lib/commercial/http";
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (!canManageFinance(user)) return NextResponse.json({ error: "Sin permisos financieros." }, { status: 403 });
+  try { return NextResponse.json(await updateInvoice((await params).id, await request.json(), { name: user.name, userId: user.id, origin: "INTERNAL" })); }
+  catch (error) { return commercialFailure(error); }
 }
-
-export async function DELETE(
-    _request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
-) {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    if (!canManageFinance(user)) return NextResponse.json({ error: "No tienes permiso para eliminar facturas." }, { status: 403 });
-    try {
-        const { id } = await params;
-        const invoice = await prisma.invoice.update({ where: { id }, data: { deletedAt: new Date() } });
-        await recordAudit({
-            action: "DELETE",
-            entityType: "Invoice",
-            entityId: invoice.id,
-            summary: `Factura ${invoice.number} enviada a papelera`,
-        });
-        invalidateCache("invoices");
-        invalidateCache("erp:");
-        invalidateCache("project:");
-        invalidateCache("dashboard:");
-        invalidateCache("reports:");
-        invalidateCache("tax:");
-        invalidateCache("gilberto:today:");
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        console.error("[invoices:delete]", error);
-        return NextResponse.json({ error: "No se pudo eliminar la factura." }, { status: 500 });
-    }
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (!canManageFinance(user)) return NextResponse.json({ error: "Sin permisos financieros." }, { status: 403 });
+  try { await archiveInvoice((await params).id, { name: user.name, userId: user.id, origin: "INTERNAL" }); return NextResponse.json({ success: true }); }
+  catch (error) { return commercialFailure(error); }
 }
