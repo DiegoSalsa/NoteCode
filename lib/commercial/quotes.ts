@@ -226,6 +226,8 @@ export async function createQuote(raw: Record<string, unknown>, actor: Actor) {
   return transaction(async (tx) => {
     let clientId =
       typeof raw.clientId === "string" && raw.clientId ? raw.clientId : null;
+    let projectId =
+      typeof raw.projectId === "string" && raw.projectId ? raw.projectId : null;
     const opportunityId =
       typeof raw.opportunityId === "string" && raw.opportunityId
         ? raw.opportunityId
@@ -236,18 +238,30 @@ export async function createQuote(raw: Record<string, unknown>, actor: Actor) {
         where: { id: opportunityId, deletedAt: null },
       });
       requireCommercial(opportunity, "Oportunidad no encontrada.", 404);
+      if (opportunity.convertedProjectId) {
+        requireCommercial(
+          !projectId || projectId === opportunity.convertedProjectId,
+          "La oportunidad ya tiene otro proyecto.",
+        );
+        projectId = opportunity.convertedProjectId;
+      }
       if (!opportunity.clientId) {
-        const client = await tx.client.create({
-          data: {
-            name:
-              opportunity.contactName ||
-              opportunity.company ||
-              opportunity.name,
-            company: opportunity.company,
-            email: opportunity.email,
-            phone: opportunity.phone,
-          },
-        });
+        const client = clientId
+          ? await tx.client.findFirst({
+              where: { id: clientId, deletedAt: null },
+            })
+          : await tx.client.create({
+              data: {
+                name:
+                  opportunity.contactName ||
+                  opportunity.company ||
+                  opportunity.name,
+                company: opportunity.company,
+                email: opportunity.email,
+                phone: opportunity.phone,
+              },
+            });
+        requireCommercial(client, "Cliente no encontrado.", 400);
         await tx.opportunity.update({
           where: { id: opportunityId },
           data: { clientId: client.id },
@@ -269,7 +283,7 @@ export async function createQuote(raw: Record<string, unknown>, actor: Actor) {
       discount: raw.discount ?? 0,
       paymentPlan: raw.paymentPlan ?? { kind: "SINGLE" },
       clientId,
-      projectId: raw.projectId || null,
+      projectId,
       opportunityId,
     });
     requireCommercial(
@@ -709,8 +723,22 @@ export async function convertQuote(
       "La propuesta ya tiene proyecto.",
     );
     const projectId = existingId ?? targetProjectId;
-    if (projectId)
+    if (projectId) {
+      await lock(tx, "projects", projectId);
       await validateLinks(tx, quote.clientId, projectId, quote.opportunityId);
+      const previousInvoices = await tx.invoice.findMany({
+        where: { projectId, deletedAt: null, status: { not: "Cancelado" } },
+        select: { currency: true },
+      });
+      requireCommercial(
+        previousInvoices.every((i) => i.currency === agreement.currency),
+        "El proyecto tiene documentos en otra moneda.",
+      );
+      if (!quote.projectId && previousInvoices.length)
+        await tx.billingMilestone.deleteMany({
+          where: { agreementId: agreement.id, invoice: null },
+        });
+    }
     const project = projectId
       ? await tx.project.findUniqueOrThrow({ where: { id: projectId } })
       : await tx.project.create({

@@ -105,6 +105,12 @@ export default function ProjectCommercial({
   async function prepare() {
     setError("");
     try {
+      const draft = quotes.find(q => q.status === "Borrador");
+      if (draft) { setEditor({ id: draft.id, initial: { ...draft, clientId, projectId } }); return; }
+      if (quotes[0]) {
+        const revision = await commercialRequest(`/api/erp/quotes/${quotes[0].id}`, { action: "revision" }, "PATCH");
+        setEditor({ id: revision.id, initial: revision }); await refresh(); return;
+      }
       setEditor({
         initial: await commercialRequest(
           `/api/commercial/prefill?projectId=${projectId}`,
@@ -138,7 +144,7 @@ export default function ProjectCommercial({
             className={commercialButton}
             onClick={() => void prepare()}
           >
-            Generar propuesta
+            {quotes.some(q => q.status === "Borrador") ? "Continuar borrador" : quotes.length ? "Preparar revisión" : "Generar propuesta"}
           </button>
         </div>
         <div className="mt-4 space-y-3">
