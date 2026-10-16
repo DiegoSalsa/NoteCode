@@ -116,6 +116,10 @@ export async function setBillingPlan(
     );
     const agreement = project.currentAgreement;
     requireCommercial(
+      agreement.milestones.length === 0,
+      "El plan aprobado se conserva. Crea una revisión comercial para cambiar sus condiciones.",
+    );
+    requireCommercial(
       !agreement.milestones.some((m) => m.invoice),
       "El plan ya tiene documentos emitidos. Conserva sus hitos y crea una revisión comercial para cambiarlo.",
     );

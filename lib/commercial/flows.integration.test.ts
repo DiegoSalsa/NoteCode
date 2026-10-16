@@ -596,6 +596,7 @@ describe("commercial integration on isolated PostgreSQL", () => {
       226100, 226100,
     ]);
     expect(summary.totals.accepted).toBe(452200);
+    await expect(setBillingPlan(project.id, { kind: "SINGLE" }, actor)).rejects.toThrow(/plan aprobado/);
     await expect(
       editQuote(q.id, { editVersion: 1, terms: "Changed" }, actor),
     ).rejects.toThrow(/inmutable/);
