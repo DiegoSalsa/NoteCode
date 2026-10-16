@@ -1280,7 +1280,7 @@ export function createTools(context: GilbertoToolContext = {}) {
                 },
             });
 
-            let result: { id?: string } | null = null;
+            let result: { id?: string } | null;
 
             try {
                 result = await sendEmail({
@@ -1646,7 +1646,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             };
 
             let item: { id: string };
-            let href = "/erp";
+            let href: string;
 
             if (area === "cotizacion") {
                 const matches = await prisma.quote.findMany({
@@ -1905,7 +1905,7 @@ export function createTools(context: GilbertoToolContext = {}) {
 
             try {
                 let item: { id: string };
-                let href = "/erp";
+                let href: string;
 
                 if (area === "contacto") {
                     const client = await findClient();
@@ -2327,7 +2327,7 @@ export function createTools(context: GilbertoToolContext = {}) {
             });
             return projects.map((project) => {
                 const economic = projectEconomics({ ...project, acceptedNet: project.currentAgreement ? Number(project.currentAgreement.netAmount) : null });
-                return { id: project.id, project: project.name, client: project.client?.name, currency: project.currency, ...economic, note: "Margen sobre precio neto aceptado; tarifas del equipo actuales. Sin neto confirmado no se calcula margen." };
+                return { id: project.id, project: project.name, client: project.client?.name, currency: project.currency, ...economic, note: "Margen sobre precio neto aceptado; tarifas del equipo actuales. Facturado y cobrado excluyen contratos recurrentes; billingByOrigin separa monedas y documentos por conciliar. Sin neto confirmado no se calcula margen." };
 
             });
         },

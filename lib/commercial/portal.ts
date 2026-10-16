@@ -1,3 +1,4 @@
+import { invoiceOrigin } from "./invoice-origin";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { publicQuote, quoteInclude } from "./quotes";
@@ -172,6 +173,12 @@ export async function portalData(access: PortalAccess) {
         status: true,
         dueDate: true,
         documentKind: true,
+        contractId: true,
+        agreementId: true,
+        billingMilestoneId: true,
+        externalReference: true,
+        source: true,
+        notes: true,
         payments: {
           select: { amount: true, currency: true, paidAt: true },
           orderBy: { paidAt: "desc" },
@@ -214,7 +221,18 @@ export async function portalData(access: PortalAccess) {
       company: access.client.company,
     },
     projects,
-    invoices,
+    invoices: invoices.map((i) => {
+      const {
+        contractId: _contract,
+        agreementId: _agreement,
+        billingMilestoneId: _milestone,
+        externalReference: _ref,
+        source: _source,
+        notes: _notes,
+        ...visible
+      } = i;
+      return { ...visible, origin: invoiceOrigin(i) };
+    }),
     tickets,
     quotes: quotes.map(publicQuote),
   };

@@ -1,11 +1,13 @@
 "use client";
 
+import { originLabels } from "@/lib/commercial/invoice-origin";
 import { useEffect, useState, useCallback } from "react";
 import { Plus, Search, Pencil, Trash2, X, ArrowUpRight, ArrowDownRight, DollarSign } from "lucide-react";
 import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
 
 type Invoice = {
+    origin: keyof typeof originLabels;
     id: string;
     projectId: string | null;
     clientId: string | null;
@@ -52,7 +54,7 @@ function asArray<T>(value: unknown): T[] {
 }
 
 function StatusBadge({ status }: { status: string }) {
-    let style = "";
+    let style: string;
     switch (status) {
         case "Pagado": style = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"; break;
         case "Pendiente": style = "bg-amber-500/10 text-amber-400 border-amber-500/20"; break;
@@ -335,7 +337,7 @@ export default function FinanzasPage() {
                         <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                                 <div>
-                                    <h3 className="text-[14px] font-medium text-neutral-200">{inv.number}</h3>
+                                    <h3 className="text-[14px] font-medium text-neutral-200">{inv.number} · {originLabels[inv.origin]}</h3>
                                     <p className="text-[12px] text-neutral-500 mt-0.5">{inv.client}</p>
                                     <p className={`mt-1 text-[10px] font-medium uppercase tracking-wide ${inv.source === "PURAGENDA" ? "text-violet-400" : inv.source === "PROJECT" ? "text-sky-400" : "text-neutral-600"}`}>
                                         {inv.source === "PURAGENDA" ? `SaaS · ${inv.product || "PuraAgenda"}` : inv.source === "PROJECT" ? "Proyecto NoteCode" : "Venta manual"}

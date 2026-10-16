@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
             description: true,
             status: true,
             agreedAmount: true,
+            currency: true,
+            currentAgreement: { select: { currency: true, netAmount: true, taxAmount: true, totalAmount: true } },
             saleNetAmount: true,
             saleTaxRate: true,
             commercialTerms: true,

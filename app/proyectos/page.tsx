@@ -12,6 +12,8 @@ import {
     ArrowUpRight,
     LockKeyhole,
 } from "lucide-react";
+import ProjectPrice from "@/components/commercial/ProjectPrice";
+import type { ProjectPriceInput } from "@/lib/commercial/price-view";
 import ProjectPrefetchLink from "@/components/ProjectPrefetchLink";
 import { fetchAndCacheJson, useCachedJson } from "@/lib/client-cache";
 import { useDebounce } from "@/lib/use-debounce";
@@ -19,7 +21,7 @@ import { useDebounce } from "@/lib/use-debounce";
 type Client = { id: string; name: string };
 type TeamMember = { id: string; name: string };
 
-type Project = {
+type Project = ProjectPriceInput & {
     id: string;
     name: string;
     description: string | null;
@@ -52,7 +54,7 @@ type ProjectsPayload = {
 const STATUSES = ["Planificado", "En progreso", "Revisión", "Completado"];
 
 function StatusBadge({ status }: { status: string }) {
-    let style = "";
+    let style: string;
     switch (status) {
         case "En progreso": style = "bg-sky-500/10 text-sky-400 border-sky-500/20"; break;
         case "Revisión": style = "bg-amber-500/10 text-amber-400 border-amber-500/20"; break;
@@ -264,9 +266,7 @@ export default function ProyectosPage() {
                                     {project.name}
                                 </ProjectPrefetchLink>
                                 <p className="text-[12px] text-neutral-500 mt-0.5">{project.client?.name || "Solo para ti"}</p>
-                                <p className="text-[12px] text-neutral-600 mt-0.5">
-                                    {scope === "personal" ? "Presupuesto personal" : "Valor acordado"}: ${(project.agreedAmount || 0).toLocaleString()}
-                                </p>
+                                {scope === "personal" ? <p className="text-[12px] text-neutral-600 mt-0.5">Presupuesto personal: ${(project.agreedAmount || 0).toLocaleString()}</p> : <ProjectPrice project={project} />}
                             </div>
                             <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4">
                                 <StatusBadge status={project.status} />

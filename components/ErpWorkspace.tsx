@@ -761,7 +761,7 @@ function FormField({ field, form, options, onChange }: { field: Field; form: Rec
             {field.source ? sourceOptions.map((option) => <option key={option.id} value={option.id}>{labelForOption(option)}</option>) : field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         ) : field.type === "checkbox" ? (
-          <button type="button" onClick={() => onChange(!Boolean(current))} className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${current ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-white/10 bg-neutral-950 text-neutral-500"}`}><span>{current ? "Sí" : "No"}</span><CheckCircle2 size={15} /></button>
+          <button type="button" onClick={() => onChange(!current)} className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${current ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-white/10 bg-neutral-950 text-neutral-500"}`}><span>{current ? "Sí" : "No"}</span><CheckCircle2 size={15} /></button>
         ) : <input required={field.required} type={field.type ?? "text"} step={field.type === "number" ? "any" : undefined} value={String(current)} onChange={(event) => onChange(field.type === "number" ? Number(event.target.value) : event.target.value)} className={base} placeholder={field.placeholder} />}
     </label>
   );
@@ -834,7 +834,7 @@ function ProjectPortfolio({ items, onOpenModule }: { items: Item[]; onOpenModule
               {financials && (
                 <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg border border-white/5 bg-neutral-950 p-3">
                   <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Costos</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.totalCost ?? 0)}</p></div>
-                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Cobrado</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.collected ?? 0)}</p></div>
+                  <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Cobrado desarrollo</p><p className="mt-1 text-xs font-medium text-neutral-300">{money.format(financials.collected ?? 0)}</p></div>
                   <div><p className="text-[10px] uppercase tracking-wide text-neutral-600">Margen</p><p className={`mt-1 text-xs font-medium ${(financials.margin ?? 0) < 0 ? "text-red-300" : "text-emerald-300"}`}>{financials.margin === null ? "Sin neto confirmado" : money.format(financials.margin ?? 0)}</p></div>
                 </div>
               )}

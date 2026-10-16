@@ -1,5 +1,7 @@
 import { invoicePaidAmount, invoiceOutstanding } from "./money";
 import { projectEconomics } from "./economics";
+import { invoiceOrigin } from "./invoice-origin";
+import { developmentObligations } from "./obligations";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -49,27 +51,41 @@ export async function projectCommercialSummary(projectId: string) {
           currency: true,
           status: true,
           dueDate: true,
+          contractId: true,
+          agreementId: true,
+          billingMilestoneId: true,
+          externalReference: true,
+          source: true,
+          notes: true,
           payments: { select: { amount: true, paidAt: true } },
         },
       },
     },
   });
   requireCommercial(project, "Proyecto no encontrado.", 404);
-  const invoiced = project.invoices.reduce((s, i) => s + i.amount, 0);
-  const collected = project.invoices.reduce(
+  const obligations = project.invoices.filter(
+    (i) => invoiceOrigin(i) !== "CONTRACT" && i.currency === project.currency,
+  );
+  const invoiced = obligations.reduce((s, i) => s + i.amount, 0);
+  const collected = obligations.reduce(
     (sum, invoice) => sum + invoicePaidAmount(invoice),
     0,
   );
 
+  const economics = projectEconomics({
+    ...project,
+    acceptedNet: project.currentAgreement
+      ? Number(project.currentAgreement.netAmount)
+      : null,
+  });
   return {
-    economics: projectEconomics({
-      ...project,
-      acceptedNet: project.currentAgreement
-        ? Number(project.currentAgreement.netAmount)
-        : null,
-    }),
+    economics,
     agreement: project.currentAgreement,
-    invoices: project.invoices,
+    invoices: project.invoices.map((i) => {
+      const { notes: _notes, externalReference: _ref, ...publicFields } = i;
+      return { ...publicFields, origin: invoiceOrigin(i) };
+    }),
+    billingByOrigin: economics.billingByOrigin,
     totals: {
       accepted: project.currentAgreement
         ? Number(project.currentAgreement.totalAmount)
@@ -79,7 +95,7 @@ export async function projectCommercialSummary(projectId: string) {
         : null,
       invoiced,
       collected,
-      outstanding: project.invoices.reduce(
+      outstanding: obligations.reduce(
         (sum, invoice) => sum + invoiceOutstanding(invoice),
         0,
       ),
@@ -88,7 +104,14 @@ export async function projectCommercialSummary(projectId: string) {
         : null,
     },
     requiresReconciliation: Boolean(
-      project.currentAgreement && !project.currentAgreement.milestones.length,
+      project.currentAgreement &&
+        !project.currentAgreement.milestones.length &&
+        (Number(project.currentAgreement.totalAmount) > invoiced ||
+          project.invoices.some(
+            (i) =>
+              invoiceOrigin(i) !== "CONTRACT" &&
+              (i.netAmount === null || i.currency !== project.currency),
+          )),
     ),
   };
 }
@@ -123,17 +146,15 @@ export async function setBillingPlan(
       !agreement.milestones.some((m) => m.invoice),
       "El plan ya tiene documentos emitidos. Conserva sus hitos y crea una revisión comercial para cambiarlo.",
     );
+    const obligations = await developmentObligations(tx, projectId);
     requireCommercial(
-      project.invoices.every(
+      obligations.every(
         (i) => i.currency === agreement.currency && i.netAmount !== null,
       ),
       "Conciliación manual necesaria: hay documentos históricos sin neto o con otra moneda.",
     );
-    const billedNet = project.invoices.reduce(
-        (s, i) => s + Number(i.netAmount),
-        0,
-      ),
-      billedTotal = project.invoices.reduce((s, i) => s + i.amount, 0);
+    const billedNet = obligations.reduce((s, i) => s + Number(i.netAmount), 0),
+      billedTotal = obligations.reduce((s, i) => s + i.amount, 0);
     const net = Number(agreement.netAmount) - billedNet,
       tax = Number(agreement.taxAmount) - (billedTotal - billedNet);
     requireCommercial(
@@ -198,14 +219,19 @@ export async function issueMilestone(
       project.clientId === agreement.clientId && !agreement.client.deletedAt,
       "Cliente incompatible con el acuerdo.",
     );
-    const prior = await tx.invoice.aggregate({
-      where: { projectId, deletedAt: null, status: { not: "Cancelado" } },
-      _sum: { amount: true },
-    });
+    const prior = await developmentObligations(tx, projectId);
     requireCommercial(
-      Number(prior._sum.amount ?? 0) + Number(milestone.amount) <=
-        Number(agreement.totalAmount) + 0.00001,
-      "La emisión excedería el precio aceptado del proyecto.",
+      prior.every((i) => i.currency === agreement.currency),
+      "Conciliación formal necesaria: hay obligaciones de desarrollo en otra moneda.",
+    );
+    const billed = prior.reduce(
+      (s, i) => s + minorUnits(i.amount, agreement.currency),
+      BigInt(0),
+    );
+    requireCommercial(
+      billed + minorUnits(Number(milestone.amount), agreement.currency) <=
+        minorUnits(Number(agreement.totalAmount), agreement.currency),
+      "La emisión excedería el precio aceptado de desarrollo.",
     );
     const invoice = await tx.invoice.create({
       data: {
@@ -338,6 +364,11 @@ async function invoiceLinks(
 export async function createInvoice(raw: unknown, actor: Actor) {
   const body = createInvoiceSchema.parse(raw);
   requireCommercial(
+    invoiceOrigin(body) !== "CONTRACT",
+    "Los cobros recurrentes deben emitirse desde un contrato explícito.",
+    400,
+  );
+  requireCommercial(
     !["Pagado", "Parcial"].includes(body.status),
     "Registra los pagos después de crear el documento.",
     400,
@@ -392,6 +423,11 @@ export async function updateInvoice(id: string, raw: unknown, actor: Actor) {
       include: { payments: true },
     });
     requireCommercial(current, "Documento no encontrado.", 404);
+    const nextOrigin = invoiceOrigin({ ...current, ...body });
+    requireCommercial(
+      (nextOrigin === "CONTRACT") === (invoiceOrigin(current) === "CONTRACT"),
+      "El origen recurrente se conserva; un cobro de contrato no se puede reclasificar manualmente.",
+    );
     const immutable = [
       "amount",
       "netAmount",

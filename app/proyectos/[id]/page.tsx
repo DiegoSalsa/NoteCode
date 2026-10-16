@@ -5,6 +5,8 @@ import Link from "next/link";
 import { revealCredential } from "@/app/actions/credentials";
 import { fetchAndCacheJson, readCachedJson, writeCachedJson } from "@/lib/client-cache";
 import { ensureRecentWebAuthn } from "@/lib/client/webauthn";
+import ProjectPrice from "@/components/commercial/ProjectPrice";
+import type { ProjectPriceInput } from "@/lib/commercial/price-view";
 import ProjectCommercial, { type ProjectInvoice, type ProjectQuote } from "@/components/ProjectCommercial";
 import MarkdownPreview from "@/components/MarkdownPreview";
 import { newIdempotencyKey } from "@/lib/http";
@@ -31,7 +33,7 @@ import {
     LineChart,
 } from "lucide-react";
 
-type ProjectData = {
+type ProjectData = ProjectPriceInput & {
     id: string;
     name: string;
     description: string | null;
@@ -180,7 +182,7 @@ function asArray<T>(value: unknown): T[] {
 }
 
 function StatusBadge({ status }: { status: string }) {
-    let style = "";
+    let style: string;
     switch (status) {
         case "En progreso": style = "bg-sky-500/10 text-sky-400 border-sky-500/20"; break;
         case "Revisión": style = "bg-amber-500/10 text-amber-400 border-amber-500/20"; break;
@@ -197,7 +199,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function PriorityBadge({ priority }: { priority: string }) {
-    let style = "";
+    let style: string;
     switch (priority) {
         case "Alta": style = "text-red-400"; break;
         case "Media": style = "text-amber-400"; break;
@@ -682,7 +684,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
         setRevealed(prev => {
             const next = new Set(prev);
-            next.has(cId) ? next.delete(cId) : next.add(cId);
+            if (next.has(cId)) next.delete(cId);
+            else next.add(cId);
             return next;
         });
     }
@@ -735,7 +738,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <div>
                         <h1 className="text-[24px] font-bold tracking-tight text-neutral-100 sm:text-[28px]">{project.name}</h1>
                         <p className="text-[14px] text-neutral-500 mt-1">{personalProject ? "Proyecto personal · solo para ti" : project.client?.name}</p>
-                        {!personalProject && <p className="text-[13px] text-neutral-500 mt-1">Valor acordado: ${(project.agreedAmount || 0).toLocaleString()}</p>}
+                        {!personalProject && <ProjectPrice project={project} />}
                         {project.description && (
                             <p className="text-[14px] text-neutral-400 mt-2 max-w-2xl">{project.description}</p>
                         )}

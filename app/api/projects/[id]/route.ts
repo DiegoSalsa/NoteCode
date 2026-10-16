@@ -1,3 +1,5 @@
+import { invoiceOrigin } from "@/lib/commercial/invoice-origin";
+import { projectEconomics } from "@/lib/commercial/economics";
 import { quoteInclude, quoteHash } from "@/lib/commercial/quotes";
 import { projectPriceData } from "@/lib/commercial/project-price";
 import { commercialFailure } from "@/lib/commercial/http";
@@ -24,6 +26,7 @@ export async function GET(
             const project = await prisma.project.findFirst({
                 where: projectAccessWhere(id, user.id),
                 include: {
+                    currentAgreement: { select: { currency: true, netAmount: true, taxAmount: true, totalAmount: true } },
                     client: { select: { id: true, name: true } },
                     owner: { select: { id: true, name: true } },
                     statusLogs: { orderBy: { createdAt: "desc" } },
@@ -59,7 +62,7 @@ export async function GET(
                     invoices: {
                       where: { deletedAt: null, status: { not: "Cancelado" } },
                       orderBy: { createdAt: "desc" },
-                      select: { id: true, number: true, amount: true, status: true, source: true, product: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
+                      select: { id: true, number: true, amount: true, status: true, source: true, contractId: true, agreementId: true, billingMilestoneId: true, externalReference: true, notes: true, currency: true, product: true, dueDate: true, paidAt: true, createdAt: true, updatedAt: true, payments: { select: { amount: true } } },
                     },
                     assignments: {
                       orderBy: { updatedAt: "desc" },
@@ -153,6 +156,7 @@ export async function GET(
                     })),
             ].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 80);
 
+            const economics = projectEconomics({ ...project, acceptedNet: project.currentAgreement ? Number(project.currentAgreement.netAmount) : null });
             return {
                 project,
                 statusLogs,
@@ -173,7 +177,7 @@ export async function GET(
                 notes,
                 documents,
                 invoice: invoices[0] ?? null,
-                invoices,
+                invoices: invoices.map(i => ({ ...i, origin: invoiceOrigin(i) })),
                 operations: {
                     assignments,
                     timeEntries,
@@ -188,8 +192,9 @@ export async function GET(
                         approvedHours: timeEntries.reduce((sum, entry) => sum + (entry.approved ? entry.hours : 0), 0),
                         laborCost: timeEntries.reduce((sum, entry) => sum + entry.hours * entry.teamMember.hourlyCost, 0),
                         expenses: expenses.reduce((sum, expense) => sum + expense.amount, 0),
-                        invoiced: invoices.reduce((sum, invoice) => sum + invoice.amount, 0),
-                        collected: invoices.reduce((sum, invoice) => sum + invoice.payments.reduce((paid, payment) => paid + payment.amount, 0), 0),
+                        invoiced: economics.invoiced,
+                        collected: economics.collected,
+                        billingByOrigin: economics.billingByOrigin,
                     },
                 },
                 timeline: timeline.map((item) => ({ ...item, at: item.at.toISOString() })),

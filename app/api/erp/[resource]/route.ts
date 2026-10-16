@@ -1,3 +1,4 @@
+import { projectPriceView } from "@/lib/commercial/price-view";
 import { projectEconomics } from "@/lib/commercial/economics";
 import { createHash, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -211,7 +212,7 @@ export async function GET(
           },
           orderBy: { updatedAt: "desc" },
           include: {
-            currentAgreement: { select: { netAmount: true } },
+            currentAgreement: { select: { currency: true, netAmount: true, taxAmount: true, totalAmount: true } },
             client: { select: { id: true, name: true } },
             assignments: {
               include: { teamMember: { select: { id: true, name: true, hourlyCost: true } } },
@@ -227,7 +228,7 @@ export async function GET(
             expenses: { where: { deletedAt: null }, select: { amount: true } },
             invoices: {
               where: { deletedAt: null },
-              select: { amount: true, status: true, payments: { select: { amount: true } } },
+              select: { amount: true, status: true, currency: true, contractId: true, agreementId: true, billingMilestoneId: true, externalReference: true, number: true, source: true, notes: true, payments: { select: { amount: true } } },
             },
             tickets: { where: { deletedAt: null }, select: { status: true } },
             approvals: { select: { status: true } },
@@ -256,6 +257,7 @@ export async function GET(
             description: project.description,
             status: project.status,
             agreedAmount: hasFinanceAccess ? project.agreedAmount : null,
+            price: hasFinanceAccess ? projectPriceView(project) : null,
             currency: project.currency,
             budgetHours: project.budgetHours,
             startDate: project.startDate,

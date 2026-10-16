@@ -1,3 +1,4 @@
+import { invoiceOrigin } from "@/lib/commercial/invoice-origin";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cached, invalidateCache } from "@/lib/server-cache";
@@ -56,6 +57,7 @@ export async function GET(request: NextRequest) {
                         dueDate: true,
                         paidAt: true,
                         source: true,
+                        contractId: true, agreementId: true, billingMilestoneId: true,
                         product: true,
                         externalReference: true,
                         createdAt: true,
@@ -116,7 +118,7 @@ export async function GET(request: NextRequest) {
             const collectibleAmount = totalAmount - canceledAmount;
 
             return {
-                items,
+                items: items.map(i => ({ ...i, origin: invoiceOrigin(i) })),
                 nextSkip: skip + items.length,
                 hasMore: skip + items.length < total,
                 total,

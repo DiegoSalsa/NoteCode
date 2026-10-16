@@ -1,6 +1,6 @@
 // Only creates/resets the dedicated loopback cluster under this checkout.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 const root = process.cwd();
 const dir = path.join(root, ".test-data");
@@ -107,14 +107,36 @@ if (mode === "backup") {
     );
   if (checksums(db) !== checksums(restore))
     throw new Error("Financial restore mismatch");
-  for (const table of ["quotes", "quote_items", "payments", "commercial_agreements", "quote_decisions", "billing_milestones", "documents", "client_portal_tokens", "portal_access_logs"]) {
-    const digest = name => sql(name, `SELECT md5(string_agg(row_to_json(r)::text, '' ORDER BY id)) FROM ${table} r`);
-    if (digest(db) !== digest(restore)) throw new Error(`Restore mismatch: ${table}`);
+  for (const table of [
+    "quotes",
+    "quote_items",
+    "payments",
+    "commercial_agreements",
+    "quote_decisions",
+    "billing_milestones",
+    "documents",
+    "client_portal_tokens",
+    "portal_access_logs",
+  ]) {
+    const digest = (name) =>
+      sql(
+        name,
+        `SELECT md5(string_agg(row_to_json(r)::text, '' ORDER BY id)) FROM ${table} r`,
+      );
+    if (digest(db) !== digest(restore))
+      throw new Error(`Restore mismatch: ${table}`);
   }
   let protectedInvoice = false;
-  try { sql(restore, "UPDATE invoices SET amount=amount+1 WHERE number='LEGACY-PAID'"); }
-  catch { protectedInvoice = true; }
-  if (!protectedInvoice) throw new Error("Restored financial protection did not execute");
+  try {
+    sql(
+      restore,
+      "UPDATE invoices SET amount=amount+1 WHERE number='LEGACY-PAID'",
+    );
+  } catch {
+    protectedInvoice = true;
+  }
+  if (!protectedInvoice)
+    throw new Error("Restored financial protection did not execute");
   console.log(`Backup restored and verified: ${counts(restore)}`);
   process.exit(0);
 }
@@ -180,6 +202,55 @@ INSERT INTO invoices(id,number,client,amount,net_amount,tax_rate,due_date,update
 fileSql(
   path.join(root, "prisma/migrations-manual/20261016_unified_commercial.sql"),
 );
+// Exercise an upgrade with already accepted/billed history under the first migration.
+sql(
+  db,
+  `
+INSERT INTO projects(id,name,client_id,updated_at) VALUES ('upgrade-project','Upgrade history','00000000-0000-4000-a000-000000000001',now());
+INSERT INTO quotes(id,number,title,client_id,project_id,calculation_version,updated_at) VALUES ('upgrade-quote','UPGRADE-QUOTE','Accepted before correction','00000000-0000-4000-a000-000000000001','upgrade-project',1,now());
+UPDATE quotes SET status='Enviada',sent_at=now() WHERE id='upgrade-quote';
+UPDATE quotes SET status='Aprobada' WHERE id='upgrade-quote';
+INSERT INTO commercial_agreements(id,quote_id,client_id,project_id,currency,net_amount,tax_amount,total_amount,tax_rate,content_hash) VALUES ('upgrade-agreement','upgrade-quote','00000000-0000-4000-a000-000000000001','upgrade-project','CLP',380000,72200,452200,19,'upgrade-hash');
+UPDATE projects SET current_agreement_id='upgrade-agreement',agreed_amount=452200 WHERE id='upgrade-project';
+INSERT INTO billing_milestones(id,agreement_id,position,title,net_amount,tax_amount,amount) VALUES ('upgrade-milestone','upgrade-agreement',0,'Anticipo',190000,36100,226100);
+INSERT INTO invoices(id,number,client,client_id,project_id,amount,net_amount,tax_rate,currency,due_date,updated_at,source,agreement_id,billing_milestone_id) VALUES ('upgrade-invoice','UPGRADE-DEV','Legacy client','00000000-0000-4000-a000-000000000001','upgrade-project',226100,190000,19,'CLP',now(),now(),'PROJECT','upgrade-agreement','upgrade-milestone');
+INSERT INTO payments(id,invoice_id,amount,currency) VALUES ('upgrade-payment','upgrade-invoice',100000,'CLP');
+UPDATE invoices SET status='Parcial' WHERE id='upgrade-invoice';
+INSERT INTO invoices(id,number,client,client_id,project_id,amount,tax_rate,currency,due_date,updated_at,status,notes) VALUES ('upgrade-recurring','REC-UPGRADE','Legacy client','00000000-0000-4000-a000-000000000001','upgrade-project',70000,0,'CLP',now(),now(),'Pagado',concat('Facturaci',chr(243),'n recurrente: Mantenimiento historico'));
+`,
+);
+const historyDigest = () =>
+  [
+    "projects",
+    "quotes",
+    "invoices",
+    "payments",
+    "commercial_agreements",
+    "billing_milestones",
+  ]
+    .map((table) =>
+      sql(
+        db,
+        `SELECT md5(string_agg(row_to_json(r)::text, '' ORDER BY id)) FROM ${table} r`,
+      ),
+    )
+    .join("|");
+const beforeCorrection = historyDigest();
+fileSql(
+  path.join(
+    root,
+    "prisma/migrations-manual/20261016_commercial_corrections.sql",
+  ),
+);
+if (historyDigest() !== beforeCorrection)
+  throw new Error("Corrective migration changed existing commercial history");
+if (
+  sql(
+    db,
+    "SELECT commercial_invoice_origin(i) FROM invoices i WHERE id='upgrade-recurring'",
+  ) !== "CONTRACT"
+)
+  throw new Error("Legacy SQL recurring classifier mismatch");
 if (
   sql(
     db,
@@ -196,5 +267,5 @@ if (
   throw new Error("Legacy invoice changed");
 writeFileSync(path.join(dir, "database-url.txt"), url);
 console.log(
-  "Isolated PostgreSQL ready; baseline → additive migration and legacy preservation verified.",
+  "Isolated PostgreSQL ready; baseline → unified migration → corrective migration and legacy preservation verified.",
 );

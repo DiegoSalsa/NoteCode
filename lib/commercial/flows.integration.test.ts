@@ -326,7 +326,7 @@ describe("commercial integration on isolated PostgreSQL", () => {
           create: {
             description: "Legacy line",
             quantity: 1,
-            unitPrice: 319327.73109243695,
+            unitPrice: Number("319327.73109243695"),
           },
         },
       },
@@ -501,7 +501,7 @@ describe("commercial integration on isolated PostgreSQL", () => {
     const { project, client } = await fixture();
     const q = await proposal(project.id);
     const { raw } = await token(client.id, project.id);
-    let access = (await resolvePortal(raw))!;
+    const access = (await resolvePortal(raw))!;
     expect((await portalData(access)).quotes).toHaveLength(0);
     await publish(q.id);
     await prisma.projectTask.createMany({
@@ -596,7 +596,9 @@ describe("commercial integration on isolated PostgreSQL", () => {
       226100, 226100,
     ]);
     expect(summary.totals.accepted).toBe(452200);
-    await expect(setBillingPlan(project.id, { kind: "SINGLE" }, actor)).rejects.toThrow(/plan aprobado/);
+    await expect(
+      setBillingPlan(project.id, { kind: "SINGLE" }, actor),
+    ).rejects.toThrow(/plan aprobado/);
     await expect(
       editQuote(q.id, { editVersion: 1, terms: "Changed" }, actor),
     ).rejects.toThrow(/inmutable/);
@@ -865,6 +867,371 @@ describe("commercial integration on isolated PostgreSQL", () => {
         ?.toISOString()
         .slice(0, 10),
     ).toBe("2026-02-28");
+  });
+  it("keeps two 226100 development milestones independent from 70000 recurring billing", async () => {
+    const { project, client } = await fixture();
+    const contract = await prisma.supportContract.create({
+      data: {
+        clientId: client.id,
+        projectId: project.id,
+        name: "Mantenimiento independiente",
+        monthlyAmount: 70000,
+        startDate: new Date("2026-10-01"),
+        nextBillingAt: new Date("2026-10-01"),
+      },
+    });
+    // Recurrence before acceptance must not suppress the approved milestone plan.
+    const recurring = (await billContract(
+      contract.id,
+      new Date("2026-10-16"),
+      actor,
+    ))!;
+    const q = await proposal(project.id);
+    await accept(q.id);
+    const first = (await projectCommercialSummary(project.id)).agreement!;
+    expect(first.milestones.map((m) => Number(m.amount))).toEqual([
+      226100, 226100,
+    ]);
+    await issueMilestone(project.id, first.milestones[0].id, actor);
+    await recordPayment(
+      {
+        invoiceId: recurring.id,
+        amount: 70000,
+        paidAt: "2026-10-16",
+        requestKey: randomUUID(),
+      },
+      actor,
+    );
+    await issueMilestone(project.id, first.milestones[1].id, actor);
+    const summary = await projectCommercialSummary(project.id);
+    expect(summary.totals).toMatchObject({
+      invoiced: 452200,
+      collected: 0,
+      outstanding: 452200,
+      unbilled: 0,
+    });
+    expect(summary.economics).toMatchObject({
+      invoiced: 452200,
+      collected: 0,
+      outstanding: 452200,
+    });
+    expect(summary.billingByOrigin.CLP.CONTRACT).toEqual({
+      invoiced: 70000,
+      collected: 70000,
+      outstanding: 0,
+    });
+    const portal = await portalData(
+      (await resolvePortal((await token(client.id, project.id)).raw))!,
+    );
+    expect(portal.invoices.find((i) => i.id === recurring.id)?.origin).toBe(
+      "CONTRACT",
+    );
+    expect(JSON.stringify(portal)).not.toContain("Facturación recurrente:");
+    const erp = await import("@/app/api/erp/[resource]/route");
+    const response = await erp.GET(
+      new NextRequest("http://localhost/api/erp/projects"),
+      { params: Promise.resolve({ resource: "projects" }) },
+    );
+    expect(response.status).toBe(200);
+    const erpProject = (await response.json()).find(
+      (p: { id: string }) => p.id === project.id,
+    );
+    expect(erpProject.financials).toMatchObject({
+      invoiced: 452200,
+      collected: 0,
+    });
+    expect(erpProject.financials.billingByOrigin.CLP.CONTRACT.collected).toBe(
+      70000,
+    );
+    const revision = await reviseQuote(q.id, actor);
+    await editQuote(
+      revision.id,
+      {
+        editVersion: revision.editVersion,
+        items: [{ description: "Ampliación", quantity: 1, unitPrice: 400000 }],
+      },
+      actor,
+    );
+    await accept(revision.id);
+    await setBillingPlan(project.id, { kind: "SINGLE" }, actor);
+    const remaining = (await projectCommercialSummary(project.id)).agreement!
+      .milestones[0];
+    expect(Number(remaining.amount)).toBe(23800);
+    await issueMilestone(project.id, remaining.id, actor);
+    expect((await projectCommercialSummary(project.id)).totals.invoiced).toBe(
+      476000,
+    );
+    expect(
+      await prisma.invoice.count({ where: { projectId: project.id } }),
+    ).toBe(4);
+  });
+
+  it.each(["Pendiente", "Parcial", "Pagado"])(
+    "guards upward, downward and below-floor revisions with a %s invoice",
+    async (status) => {
+      const { project, client } = await fixture();
+      const q = await proposal(project.id);
+      await accept(q.id);
+      const original = (await projectCommercialSummary(project.id)).agreement!;
+      const invoice = await issueMilestone(
+        project.id,
+        original.milestones[0].id,
+        actor,
+      );
+      if (status !== "Pendiente")
+        await recordPayment(
+          {
+            invoiceId: invoice.id,
+            amount: status === "Parcial" ? 100000 : 226100,
+            paidAt: "2026-10-16",
+            requestKey: randomUUID(),
+          },
+          actor,
+        );
+      const history = await prisma.invoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: { payments: true },
+      });
+      // Reject 178500 while 226100 remains invoiced, even if it is fully paid.
+      const low = await reviseQuote(q.id, actor);
+      await editQuote(
+        low.id,
+        {
+          editVersion: low.editVersion,
+          items: [
+            {
+              description: "Reducción inválida",
+              quantity: 1,
+              unitPrice: 150000,
+            },
+          ],
+        },
+        actor,
+      );
+      const sent = await publish(low.id);
+      await expect(
+        transitionQuote(low.id, "Aprobada", quoteHash(sent), undefined, actor),
+      ).rejects.toThrow(/obligaciones facturadas/);
+      expect(
+        (await prisma.project.findUniqueOrThrow({ where: { id: project.id } }))
+          .currentAgreementId,
+      ).toBe(original.id);
+      expect(
+        await prisma.quoteDecision.count({ where: { quoteId: low.id } }),
+      ).toBe(0);
+      expect(
+        await prisma.commercialAgreement.count({ where: { quoteId: low.id } }),
+      ).toBe(0);
+      // The same published decision cannot bypass the guard through ERP.
+      const erp = await import("@/app/api/erp/[resource]/[id]/route");
+      const rejected = await erp.PATCH(
+        new NextRequest("http://localhost/api/erp/quotes/" + low.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "Aprobada",
+            contentHash: quoteHash(sent),
+          }),
+        }),
+        { params: Promise.resolve({ resource: "quotes", id: low.id }) },
+      );
+      expect(rejected.status).toBe(409);
+      const portalActor = await token(client.id, project.id);
+      await expect(
+        transitionQuote(
+          low.id,
+          "Aprobada",
+          quoteHash(sent),
+          undefined,
+          portalActor.actor,
+        ),
+      ).rejects.toThrow(/obligaciones facturadas/);
+      // A higher price, a lower price above the floor, and the exact floor are valid.
+      let current = low;
+      for (const net of [500000, 300000, 190000]) {
+        const revised = await reviseQuote(current.id, actor);
+        await editQuote(
+          revised.id,
+          {
+            editVersion: revised.editVersion,
+            items: [
+              { description: "Alcance revisado", quantity: 1, unitPrice: net },
+            ],
+          },
+          actor,
+        );
+        await accept(revised.id);
+        expect(
+          (await projectCommercialSummary(project.id)).totals.accepted,
+        ).toBe(quoteTotals([{ quantity: 1, unitPrice: net }]).total);
+        current = revised;
+      }
+      expect(
+        await prisma.invoice.findUniqueOrThrow({
+          where: { id: invoice.id },
+          include: { payments: true },
+        }),
+      ).toEqual(history);
+      expect(
+        (
+          await prisma.commercialAgreement.findUniqueOrThrow({
+            where: { id: original.id },
+          })
+        ).totalAmount.toNumber(),
+      ).toBe(452200);
+      expect(
+        await prisma.quoteDecision.count({
+          where: { quoteId: q.id, status: "Aprobada" },
+        }),
+      ).toBe(1);
+    },
+  );
+
+  it("guards conversion and direct SQL against a price below existing obligations", async () => {
+    const { project, client } = await fixture();
+    const invoice = await prisma.invoice.create({
+      data: {
+        projectId: project.id,
+        clientId: client.id,
+        client: client.name,
+        number: `UNATTRIBUTED-${randomUUID()}`,
+        amount: 500000,
+        netAmount: null,
+        dueDate: new Date(),
+      },
+    });
+    const q = await proposal(undefined, client.id);
+    await accept(q.id);
+    await expect(convertQuote(q.id, project.id, actor)).rejects.toThrow(
+      /obligaciones facturadas/,
+    );
+    const agreement = await prisma.commercialAgreement.findUniqueOrThrow({
+      where: { quoteId: q.id },
+    });
+    // Simulate a client bypassing the services; the project trigger must also refuse.
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await tx.commercialAgreement.update({
+          where: { id: agreement.id },
+          data: { projectId: project.id },
+        });
+        await tx.project.update({
+          where: { id: project.id },
+          data: { currentAgreementId: agreement.id, agreedAmount: 452200 },
+        });
+      }),
+    ).rejects.toThrow(/below existing invoiced obligations/);
+    expect(
+      (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } }))
+        .amount,
+    ).toBe(500000);
+  });
+
+  it("enforces milestone provenance and the development cap in SQL", async () => {
+    const { project, client } = await fixture();
+    const q = await proposal(project.id);
+    await accept(q.id);
+    const a = (await projectCommercialSummary(project.id)).agreement!;
+    const contract = await prisma.supportContract.create({
+      data: {
+        clientId: client.id,
+        projectId: project.id,
+        name: "Mantenimiento",
+        monthlyAmount: 70000,
+        startDate: new Date(),
+      },
+    });
+    const data = {
+      clientId: client.id,
+      client: client.name,
+      projectId: project.id,
+      amount: 226100,
+      netAmount: 190000,
+      dueDate: new Date(),
+      agreementId: a.id,
+      billingMilestoneId: a.milestones[0].id,
+    };
+    await expect(
+      prisma.invoice.create({
+        data: {
+          ...data,
+          number: `MIXED-${randomUUID()}`,
+          contractId: contract.id,
+        },
+      }),
+    ).rejects.toThrow(/recurring invoice/);
+    await expect(
+      prisma.invoice.create({
+        data: { ...data, number: `WRONG-${randomUUID()}`, amount: 1 },
+      }),
+    ).rejects.toThrow(/match its development milestone/);
+    await issueMilestone(project.id, a.milestones[0].id, actor);
+    await issueMilestone(project.id, a.milestones[1].id, actor);
+    await expect(
+      prisma.invoice.create({
+        data: {
+          projectId: project.id,
+          clientId: client.id,
+          client: client.name,
+          number: `OVER-${randomUUID()}`,
+          amount: 1,
+          dueDate: new Date(),
+        },
+      }),
+    ).rejects.toThrow(/exceeds accepted development/);
+  });
+
+  it("serializes a price reduction against concurrent milestone issuance", async () => {
+    const { project } = await fixture();
+    const q = await proposal(project.id);
+    await accept(q.id);
+    const a = (await projectCommercialSummary(project.id)).agreement!;
+    await issueMilestone(project.id, a.milestones[0].id, actor);
+    const revision = await reviseQuote(q.id, actor);
+    await editQuote(
+      revision.id,
+      {
+        editVersion: revision.editVersion,
+        items: [{ description: "Reducción", quantity: 1, unitPrice: 300000 }],
+      },
+      actor,
+    );
+    const sent = await publish(revision.id);
+    const results = await Promise.allSettled([
+      issueMilestone(project.id, a.milestones[1].id, actor),
+      transitionQuote(sent.id, "Aprobada", quoteHash(sent), undefined, actor),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const summary = await projectCommercialSummary(project.id);
+    expect(summary.totals.accepted!).toBeGreaterThanOrEqual(
+      summary.totals.invoiced,
+    );
+  });
+
+  it("recognizes pre-correction recurring history in SQL and services without rewriting it", async () => {
+    const legacy = await prisma.invoice.findUniqueOrThrow({
+      where: { id: "upgrade-recurring" },
+    });
+    const summary = await projectCommercialSummary("upgrade-project");
+    expect(summary.totals.invoiced).toBe(226100);
+    expect(summary.billingByOrigin.CLP.CONTRACT.collected).toBe(70000);
+    const rows = await prisma.$queryRaw<
+      Array<{ origin: string }>
+    >`SELECT commercial_invoice_origin(i) AS origin FROM invoices i WHERE id=${legacy.id}`;
+    expect(rows[0].origin).toBe("CONTRACT");
+    expect(
+      await prisma.invoice.findUniqueOrThrow({ where: { id: legacy.id } }),
+    ).toEqual(legacy);
+    await expect(
+      prisma.invoice.create({
+        data: {
+          number: `REC-SPOOF-${randomUUID()}`,
+          client: legacy.client,
+          amount: 1,
+          dueDate: new Date(),
+          externalReference: `contract:spoof:${randomUUID()}`,
+        },
+      }),
+    ).rejects.toThrow(/explicit contract/);
   });
   it("keeps HTTP adapters authorized and rejects incompatible legacy update paths", async () => {
     const erp = await import("@/app/api/erp/[resource]/[id]/route"),

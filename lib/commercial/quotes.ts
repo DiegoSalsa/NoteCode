@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  assertAgreementCoversObligations,
+  developmentObligations,
+} from "./obligations";
 import { allocatePlan, quoteTotals, type PaymentPlan } from "./money";
 import {
   canTransition,
@@ -611,18 +615,6 @@ async function acceptAgreement(tx: Tx, quote: LoadedQuote) {
         (quote.sentAt && current.currentAgreement.quote.sentAt <= quote.sentAt),
       "Una propuesta posterior ya define el acuerdo del proyecto.",
     );
-    const currencies = await tx.invoice.findMany({
-      where: {
-        projectId: quote.projectId,
-        deletedAt: null,
-        status: { not: "Cancelado" },
-      },
-      select: { currency: true },
-    });
-    requireCommercial(
-      currencies.every((i) => i.currency === quote.currency),
-      "No se puede cambiar moneda con cobros existentes.",
-    );
   }
   const totals = quoteTotals(
     quote.items,
@@ -631,6 +623,11 @@ async function acceptAgreement(tx: Tx, quote: LoadedQuote) {
     quote.currency,
     quote.calculationVersion,
   );
+  if (quote.projectId)
+    await assertAgreementCoversObligations(tx, quote.projectId, {
+      currency: quote.currency,
+      totalAmount: totals.total,
+    });
   const agreement = await tx.commercialAgreement.create({
     data: {
       quoteId: quote.id,
@@ -665,13 +662,7 @@ async function acceptAgreement(tx: Tx, quote: LoadedQuote) {
     });
   }
   const priorInvoices = quote.projectId
-    ? await tx.invoice.count({
-        where: {
-          projectId: quote.projectId,
-          deletedAt: null,
-          status: { not: "Cancelado" },
-        },
-      })
+    ? (await developmentObligations(tx, quote.projectId)).length
     : 0;
   // Historical or already-billed projects need an explicit reconciliation, never an automatic second charge.
   if (!priorInvoices && quote.calculationVersion === 1) {
@@ -726,13 +717,10 @@ export async function convertQuote(
     if (projectId) {
       await lock(tx, "projects", projectId);
       await validateLinks(tx, quote.clientId, projectId, quote.opportunityId);
-      const previousInvoices = await tx.invoice.findMany({
-        where: { projectId, deletedAt: null, status: { not: "Cancelado" } },
-        select: { currency: true },
-      });
-      requireCommercial(
-        previousInvoices.every((i) => i.currency === agreement.currency),
-        "El proyecto tiene documentos en otra moneda.",
+      const previousInvoices = await assertAgreementCoversObligations(
+        tx,
+        projectId,
+        agreement,
       );
       if (!quote.projectId && previousInvoices.length)
         await tx.billingMilestone.deleteMany({

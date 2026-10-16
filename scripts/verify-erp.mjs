@@ -17,7 +17,7 @@ try {
       },
       include: { items: true },
     });
-    const project = await tx.project.create({ data: { name: "ERP Verify Project", clientId: client.id, agreedAmount: 1190000, quote: { connect: { id: quote.id } } } });
+    const project = await tx.project.create({ data: { name: "ERP Verify Project", client: { connect: { id: client.id } }, agreedAmount: 1190000, quotes: { connect: { id: quote.id } } } });
     await tx.clientPortalToken.create({ data: { clientId: client.id, tokenHash: `verify-${Date.now()}` } });
     await tx.quote.update({ where: { id: quote.id }, data: { status: "Enviada", sentAt: new Date() } });
     const portalQuotes = await tx.quote.count({ where: { clientId: client.id, deletedAt: null, status: { not: "Borrador" } } });
@@ -34,6 +34,7 @@ try {
     await tx.expense.create({ data: { supplierId: supplier.id, projectId: project.id, description: "Servicio externo", amount: 100000, date: new Date() } });
     const invoice = await tx.invoice.create({ data: { projectId: project.id, clientId: client.id, number: `VERIFY-INV-${Date.now()}`, client: client.name, amount: 1190000, dueDate: new Date() } });
     await tx.payment.create({ data: { invoiceId: invoice.id, amount: 500000 } });
+    await tx.invoice.update({ where: { id: invoice.id }, data: { status: "Parcial" } });
     const contract = await tx.supportContract.create({ data: { clientId: client.id, projectId: project.id, name: "ERP Verify Support", startDate: new Date(), monthlyAmount: 250000 } });
     const ticket = await tx.supportTicket.create({ data: { number: `VERIFY-TKT-${Date.now()}`, clientId: client.id, projectId: project.id, contractId: contract.id, subject: "Prueba", description: "Validación integral" } });
     await tx.ticketComment.create({ data: { ticketId: ticket.id, author: "Verifier", body: "Respuesta" } });

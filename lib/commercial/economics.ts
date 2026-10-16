@@ -1,4 +1,9 @@
 import { invoicePaidAmount, invoiceOutstanding } from "./money";
+import {
+  invoiceOrigin,
+  billingByOrigin,
+  type InvoiceOriginFields,
+} from "./invoice-origin";
 export type EconomicInputs = {
   currency?: string;
   acceptedNet: number | null;
@@ -6,17 +11,24 @@ export type EconomicInputs = {
   budgetCost: number;
   timeEntries: Array<{ hours: number; teamMember: { hourlyCost: number } }>;
   expenses: Array<{ amount: number }>;
-  invoices: Array<{
-    amount: number;
-    netAmount?: number | null;
-    currency?: string;
-    status: string;
-    payments: Array<{ amount: number }>;
-  }>;
+  invoices: Array<
+    InvoiceOriginFields & {
+      amount: number;
+      netAmount?: number | null;
+      currency?: string;
+      status: string;
+      payments: Array<{ amount: number }>;
+    }
+  >;
 };
 // Costs use current team rates, as the existing TimeEntry model has no historical rate snapshot.
 export function projectEconomics(input: EconomicInputs) {
-  const active = input.invoices.filter((i) => i.status !== "Cancelado");
+  const active = input.invoices.filter(
+    (i) =>
+      i.status !== "Cancelado" &&
+      invoiceOrigin(i) !== "CONTRACT" &&
+      (i.currency ?? "CLP") === (input.currency ?? "CLP"),
+  );
   const laborCost = input.timeEntries.reduce(
     (s, e) => s + e.hours * e.teamMember.hourlyCost,
     0,
@@ -26,6 +38,8 @@ export function projectEconomics(input: EconomicInputs) {
   const collected = active.reduce((s, i) => s + invoicePaidAmount(i), 0);
   const totalCost = laborCost + expenses;
   return {
+    billingByOrigin: billingByOrigin(input.invoices),
+    billingBasis: "DEVELOPMENT_AND_UNATTRIBUTED" as const,
     laborCost,
     expenses,
     totalCost,

@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { formatMoney, invoicePaidAmount } from "@/lib/commercial/money";
 import {
-  formatMoney,
-  invoicePaidAmount,
-  invoiceOutstanding,
-} from "@/lib/commercial/money";
+  originLabels,
+  type billingByOrigin,
+} from "@/lib/commercial/invoice-origin";
 import PaymentForm from "./PaymentForm";
 type Summary = {
   economics: {
@@ -29,7 +29,9 @@ type Summary = {
       invoice: { id: string; number: string; status: string } | null;
     }>;
   } | null;
+  billingByOrigin: ReturnType<typeof billingByOrigin>;
   invoices: Array<{
+    origin: keyof typeof originLabels;
     id: string;
     number: string;
     amount: number;
@@ -141,8 +143,8 @@ export default function ProjectBilling({
           </p>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
             {[
-              ["Facturado", summary.totals.invoiced],
-              ["Cobrado", summary.totals.collected],
+              ["Facturado desarrollo", summary.totals.invoiced],
+              ["Cobrado desarrollo", summary.totals.collected],
               ["Pendiente de pago", summary.totals.outstanding],
               ["Por facturar", summary.totals.unbilled ?? 0],
             ].map(([label, value]) => (
@@ -213,6 +215,29 @@ export default function ProjectBilling({
           históricos se conservan.
         </p>
       )}
+      <div className="mt-4 space-y-2 text-xs text-neutral-400">
+        <p>
+          Los contratos recurrentes se contabilizan por separado. El origen por
+          conciliar reserva presupuesto de desarrollo hasta su revisión formal.
+        </p>
+        {Object.entries(summary?.billingByOrigin ?? {}).map(
+          ([code, buckets]) => (
+            <p key={code}>
+              Contratos recurrentes: facturado{" "}
+              {formatMoney(buckets.CONTRACT.invoiced, code)} · cobrado{" "}
+              {formatMoney(buckets.CONTRACT.collected, code)} · pendiente{" "}
+              {formatMoney(buckets.CONTRACT.outstanding, code)}.
+              {buckets.UNATTRIBUTED.invoiced > 0 && (
+                <>
+                  {" "}
+                  Origen por conciliar:{" "}
+                  {formatMoney(buckets.UNATTRIBUTED.invoiced, code)}.
+                </>
+              )}
+            </p>
+          ),
+        )}
+      </div>
       <div className="mt-4 space-y-2">
         {summary?.invoices.map((i) => (
           <div
@@ -220,7 +245,7 @@ export default function ProjectBilling({
             className="flex flex-wrap justify-between gap-2 border-t border-white/5 py-3 text-xs"
           >
             <span>
-              {i.number} · {i.status}
+              {i.number} · {i.status} · {originLabels[i.origin]}
             </span>
             <span>
               {formatMoney(i.amount, i.currency)} · abonado{" "}

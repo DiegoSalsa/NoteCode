@@ -75,7 +75,30 @@ test("project → prefilled proposal → changes → revised portal acceptance �
 }, info) => {
   await owner(context);
   const { project } = await createProject(context.request);
+  await page.goto("/proyectos");
+  await page.getByPlaceholder("Buscar proyectos...").fill(project.name);
+  const proposed = page.getByTestId("project-price");
+  await expect(proposed).toHaveCount(1);
+  await expect(proposed).toContainText(
+    "Precio propuesto · pendiente de aceptación",
+  );
+  await expect(proposed).toContainText("Neto $380.000 · IVA $72.200");
+  await expect(proposed).toContainText("Total $452.200");
+  await page.screenshot({
+    path: info.outputPath("project-list-proposed.png"),
+    fullPage: true,
+  });
   await page.goto(`/proyectos/${project.id}`);
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Precio propuesto · pendiente de aceptación",
+  );
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Total $452.200",
+  );
+  await page.screenshot({
+    path: info.outputPath("project-detail-proposed.png"),
+    fullPage: true,
+  });
   await page.getByRole("button", { name: /^Comercial/ }).click();
   await page
     .getByRole("button", { name: "Generar propuesta", exact: true })
@@ -213,6 +236,12 @@ test("project → prefilled proposal → changes → revised portal acceptance �
       ),
     )
     .toBe(true);
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Acuerdo aceptado",
+  );
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Total $452.200",
+  );
   await page.screenshot({
     path: info.outputPath("project-commercial.png"),
     fullPage: true,
@@ -221,6 +250,15 @@ test("project → prefilled proposal → changes → revised portal acceptance �
     path: info.outputPath("client-portal.png"),
     fullPage: true,
   });
+  await page.goto("/proyectos");
+  await page.getByPlaceholder("Buscar proyectos...").fill(project.name);
+  await expect(page.getByTestId("project-price")).toHaveCount(1);
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Acuerdo aceptado",
+  );
+  await expect(page.getByTestId("project-price")).toContainText(
+    "Total $452.200",
+  );
   await external.close();
 });
 
