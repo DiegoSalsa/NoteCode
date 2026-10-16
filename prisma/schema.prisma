@@ -22,6 +22,7 @@ model Client {
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
   deletedAt     DateTime?           @map("deleted_at")
+  agreements    CommercialAgreement[]
   projects      Project[]
   contacts      Contact[]
   opportunities Opportunity[]
@@ -45,6 +46,13 @@ model Project {
   personalOwnerId String?      @map("personal_owner_id")
   personalOwner   UserProfile? @relation("PersonalProjectOwner", fields: [personalOwnerId], references: [userId], onDelete: Cascade)
   status          String       @default("En progreso")
+  saleNetAmount          Decimal?              @map("sale_net_amount") @db.Decimal(20, 4)
+  saleTaxRate            Decimal?              @map("sale_tax_rate") @db.Decimal(7, 4)
+  commercialTerms        String?               @map("commercial_terms")
+  currentAgreementId     String?               @unique @map("current_agreement_id")
+  currentAgreement       CommercialAgreement?  @relation("CurrentAgreement", fields: [currentAgreementId], references: [id], onDelete: Restrict)
+  agreements             CommercialAgreement[] @relation("ProjectAgreements")
+  convertedOpportunities Opportunity[]
   agreedAmount    Float        @default(0) @map("agreed_amount")
   currency        String       @default("CLP")
   budgetHours     Float        @default(0) @map("budget_hours")
@@ -363,6 +371,13 @@ model PersonalSecret {
 }
 
 model Invoice {
+  agreementId        String?              @map("agreement_id")
+  agreement          CommercialAgreement? @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  billingMilestoneId String?              @unique @map("billing_milestone_id")
+  billingMilestone   BillingMilestone?    @relation(fields: [billingMilestoneId], references: [id], onDelete: Restrict)
+  contractId         String?              @map("contract_id")
+  contract           SupportContract?     @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  documentKind       String               @default("INTERNAL") @map("document_kind")
   id                String    @id @default(uuid())
   projectId         String?   @map("project_id")
   project           Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -387,6 +402,8 @@ model Invoice {
   deletedAt         DateTime? @map("deleted_at")
   payments          Payment[]
 
+  @@index([agreementId], map: "invoices_agreement_idx")
+  @@index([contractId], map: "invoices_contract_idx")
   @@index([status])
   @@index([projectId])
   @@index([clientId])
@@ -451,6 +468,8 @@ model Contact {
 }
 
 model Opportunity {
+  convertedProjectId String?       @map("converted_project_id")
+  convertedProject   Project?      @relation(fields: [convertedProjectId], references: [id], onDelete: Restrict)
   id            String        @id @default(uuid())
   clientId      String?       @map("client_id")
   client        Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -474,6 +493,7 @@ model Opportunity {
   activities    CrmActivity[]
   quotes        Quote[]
 
+  @@index([convertedProjectId], map: "opportunities_converted_project_idx")
   @@index([stage])
   @@index([clientId])
   @@index([expectedClose])
@@ -500,6 +520,14 @@ model CrmActivity {
 }
 
 model Quote {
+  calculationVersion Int                  @default(0) @map("calculation_version")
+  editVersion        Int                  @default(1) @map("edit_version")
+  scope              String?
+  contentHash        String?              @map("content_hash")
+  publishedSnapshot  Json?                @map("published_snapshot")
+  paymentPlan        Json                 @default("{\"kind\":\"SINGLE\"}") @map("payment_plan")
+  decisions          QuoteDecision[]
+  agreement          CommercialAgreement?
   id            String       @id @default(uuid())
   number        String       @unique
   clientId      String       @map("client_id")
@@ -683,6 +711,7 @@ model Expense {
 }
 
 model Payment {
+  requestKey String?  @unique @map("request_key")
   id        String   @id @default(uuid())
   invoiceId String   @map("invoice_id")
   invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -700,6 +729,7 @@ model Payment {
 }
 
 model SupportContract {
+  invoices        Invoice[]
   id              String          @id @default(uuid())
   clientId        String          @map("client_id")
   client          Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
@@ -2104,4 +2134,64 @@ model SeoOpportunity {
   @@index([pageKey])
   @@index([taskId])
   @@map("seo_opportunities")
+}
+
+// Accepted proposals are immutable commercial evidence. Existing records are not backfilled.
+model CommercialAgreement {
+  id                String             @id @default(uuid())
+  quoteId           String             @unique @map("quote_id")
+  quote             Quote              @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  clientId          String             @map("client_id")
+  client            Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectId         String?            @map("project_id")
+  project           Project?           @relation("ProjectAgreements", fields: [projectId], references: [id], onDelete: Restrict)
+  currentForProject Project?           @relation("CurrentAgreement")
+  currency          String
+  netAmount         Decimal            @map("net_amount") @db.Decimal(20, 4)
+  taxAmount         Decimal            @map("tax_amount") @db.Decimal(20, 4)
+  totalAmount       Decimal            @map("total_amount") @db.Decimal(20, 4)
+  taxRate           Decimal            @map("tax_rate") @db.Decimal(7, 4)
+  terms             String?
+  scope             String?
+  contentHash       String             @map("content_hash")
+  acceptedAt        DateTime           @default(now()) @map("accepted_at")
+  milestones        BillingMilestone[]
+  invoices          Invoice[]
+
+  @@index([projectId, acceptedAt])
+  @@map("commercial_agreements")
+}
+
+model QuoteDecision {
+  id            String   @id @default(uuid())
+  quoteId       String   @map("quote_id")
+  quote         Quote    @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  status        String
+  contentHash   String   @map("content_hash")
+  actor         String
+  origin        String
+  portalTokenId String?  @map("portal_token_id")
+  feedback      String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([quoteId, status])
+  @@index([quoteId, createdAt])
+  @@map("quote_decisions")
+}
+
+model BillingMilestone {
+  id          String              @id @default(uuid())
+  agreementId String              @map("agreement_id")
+  agreement   CommercialAgreement @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  position    Int
+  title       String
+  netAmount   Decimal             @map("net_amount") @db.Decimal(20, 4)
+  taxAmount   Decimal             @map("tax_amount") @db.Decimal(20, 4)
+  amount      Decimal             @db.Decimal(20, 4)
+  dueDate     DateTime?           @map("due_date")
+  status      String              @default("Planned")
+  invoice     Invoice?
+
+  @@unique([agreementId, position])
+  @@map("billing_milestones")
 }

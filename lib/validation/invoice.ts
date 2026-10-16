@@ -1,8 +1,22 @@
 import { z } from "zod";
 
-const optionalId = z.union([z.string().uuid(), z.literal("")]).optional().nullable();
-const dateString = z.string().refine((value) => !Number.isNaN(new Date(value).getTime()), "Fecha invalida.");
-const invoiceStatus = z.enum(["Pendiente", "Parcial", "Pagado", "Vencido", "Cancelado"]);
+const optionalId = z
+  .union([z.string().uuid(), z.literal("")])
+  .optional()
+  .nullable();
+const dateString = z
+  .string()
+  .refine(
+    (value) => !Number.isNaN(new Date(value).getTime()),
+    "Fecha invalida.",
+  );
+const invoiceStatus = z.enum([
+  "Pendiente",
+  "Parcial",
+  "Pagado",
+  "Vencido",
+  "Cancelado",
+]);
 
 export const createInvoiceSchema = z.object({
   number: z.string().trim().min(1).max(100),
@@ -10,9 +24,14 @@ export const createInvoiceSchema = z.object({
   clientId: optionalId,
   projectId: optionalId,
   amount: z.coerce.number().finite().positive().max(9_999_999_999),
-  netAmount: z.coerce.number().finite().nonnegative().max(9_999_999_999).optional(),
+  netAmount: z.coerce
+    .number()
+    .finite()
+    .nonnegative()
+    .max(9_999_999_999)
+    .optional(),
   taxRate: z.coerce.number().finite().min(0).max(100).default(19),
-  currency: z.literal("CLP").default("CLP"),
+  currency: z.enum(["CLP", "USD", "EUR"]).default("CLP"),
   issuedAt: dateString.optional(),
   dueDate: dateString,
   status: invoiceStatus.default("Pendiente"),
@@ -23,5 +42,10 @@ export const createInvoiceSchema = z.object({
 });
 
 export const updateInvoiceSchema = createInvoiceSchema.partial().extend({
+  // Zod 4 applies inner defaults even under partial(); PATCH must preserve omitted fields.
+  taxRate: z.coerce.number().finite().min(0).max(100).optional(),
+  currency: z.enum(["CLP", "USD", "EUR"]).optional(),
+  status: invoiceStatus.optional(),
+  source: z.enum(["MANUAL", "PROJECT", "PURAGENDA", "OTHER"]).optional(),
   paidAt: z.union([dateString, z.null()]).optional(),
 });
