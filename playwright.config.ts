@@ -5,6 +5,8 @@ const env = {
   DIRECT_URL: "postgresql://postgres@127.0.0.1:55473/notecode_commercial_test",
   SESSION_SECRET: "commercial-local-test-secret-32chars",
   ENCRYPTION_KEY: "12345678901234567890123456789012",
+  SUPABASE_URL: "",
+  SUPABASE_SERVICE_ROLE_KEY: "",
 };
 Object.assign(process.env, env);
 export default defineConfig({
