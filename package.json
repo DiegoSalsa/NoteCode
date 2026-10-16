@@ -12,7 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "verify:erp": "node scripts/verify-erp.mjs"
+    "verify:erp": "node scripts/verify-erp.mjs",
+    "test:commercial:db": "node scripts/commercial-test-db.mjs prepare",
+    "test:commercial": "vitest run --config vitest.commercial.config.ts",
+    "test:e2e": "playwright test",
+    "test:commercial:restore": "node scripts/commercial-test-db.mjs backup"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.39",
@@ -32,6 +36,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/node": "^25.0.3",
     "@types/react": "^19.1.9",

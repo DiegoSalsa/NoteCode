@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -8,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    exclude: [...configDefaults.exclude, "**/*.integration.test.ts", "e2e/**"],
     env: {
       ENCRYPTION_KEY: "12345678901234567890123456789012",
       ENCRYPTION_KEY_PREVIOUS: "abcdefghijklmnopqrstuvwxyz123456",
