@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 type Portal = {
   id: string;
   label: string;
@@ -13,44 +13,56 @@ export default function ProjectPortal({ projectId }: { projectId: string }) {
   const [portals, setPortals] = useState<Portal[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const active = useRef<{
+    projectId: string;
+    controller: AbortController;
+  } | null>(null);
   const load = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal: AbortSignal) => {
       const r = await fetch(`/api/projects/${projectId}/portal`, { signal });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error);
-      if (!signal?.aborted) setPortals(data);
+      if (!signal.aborted) setPortals(data);
     },
     [projectId],
   );
   useEffect(() => {
     const controller = new AbortController();
+    active.current = { projectId, controller };
     setPortals([]);
     setError("");
+    setBusy(false);
     void load(controller.signal).catch((e) => {
       if (!controller.signal.aborted) setError(e.message);
     });
     return () => controller.abort();
-  }, [load]);
+  }, [load, projectId]);
   async function action(
     url: string,
     body: Record<string, unknown>,
     method = "POST",
   ) {
+    const current = active.current;
+    if (!current || current.projectId !== projectId) return;
+    const { signal } = current.controller;
+    if (signal.aborted) return;
     setBusy(true);
     setError("");
     try {
       const r = await fetch(url, {
+        signal,
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error);
-      await load();
+      if (!signal.aborted) await load(signal);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo completar.");
+      if (!signal.aborted)
+        setError(e instanceof Error ? e.message : "No se pudo completar.");
     } finally {
-      setBusy(false);
+      if (!signal.aborted) setBusy(false);
     }
   }
   return (
